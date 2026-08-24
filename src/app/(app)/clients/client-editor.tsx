@@ -119,6 +119,19 @@ export function ClientEditor({
 
         {canEditValues && (
           <div className="grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] p-3.5 sm:grid-cols-3">
+            <Field
+              label="Zoho Books customer name"
+              htmlFor="zoho_name"
+              hint="Exactly as it appears in Zoho — usually the legal name. Used to match their invoices when syncing."
+              className="sm:col-span-3"
+            >
+              <TextInput
+                id="zoho_name"
+                name="zoho_name"
+                defaultValue={client?.zoho_name ?? ""}
+                placeholder="e.g. MACKLY CLOTHING PRIVATE LIMITED"
+              />
+            </Field>
             <Field label={`Retainer / month (${currencySymbol})`} htmlFor="retainer_amount">
               <TextInput
                 id="retainer_amount"

@@ -42,6 +42,7 @@ create table if not exists foundery.clients (
   owner           text,
   health          text not null default 'green',       -- green | amber | red
   notes           text,
+  zoho_name       text,                                -- customer name in Zoho Books, for invoice sync
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -85,6 +86,7 @@ create index if not exists idx_invoices_client on foundery.invoices(client_id);
 -- Ties a row to the external system it was synced from (e.g. Zoho Books), so
 -- re-syncing updates in place instead of duplicating.
 alter table foundery.invoices add column if not exists external_id text unique;
+alter table foundery.clients  add column if not exists zoho_name text;
 create index if not exists idx_invoices_due    on foundery.invoices(due_date);
 
 create table if not exists foundery.onboarding_forms (

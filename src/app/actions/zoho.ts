@@ -41,10 +41,16 @@ export async function syncZohoInvoices(): Promise<{
   }
 
   const db = await getDb();
-  const clients = await db.query<{ id: number; name: string }>(
-    `SELECT id, name FROM foundery.clients`,
+  const clients = await db.query<{ id: number; name: string; zoho_name: string | null }>(
+    `SELECT id, name, zoho_name FROM foundery.clients`,
   );
-  const byName = new Map(clients.map((client) => [client.name.trim().toLowerCase(), client.id]));
+  // The explicit Zoho mapping wins; the plain client name is the fallback, so
+  // a brand named the same in both systems needs no mapping at all.
+  const byName = new Map<string, number>();
+  for (const client of clients) byName.set(client.name.trim().toLowerCase(), client.id);
+  for (const client of clients) {
+    if (client.zoho_name) byName.set(client.zoho_name.trim().toLowerCase(), client.id);
+  }
 
   let created = 0;
   let updated = 0;

@@ -32,6 +32,7 @@ export type ClientView = {
   one_time_value: number | null;
   delivery_cost: number | null;
   health: Health | null;
+  zoho_name: string | null;
 };
 
 type ClientRow = {
@@ -39,7 +40,7 @@ type ClientRow = {
   vip: boolean; services: unknown; owner: string | null; start_date: string | null;
   end_date: string | null; billing_day: number; terms_days: number; currency: string;
   notes: string | null; retainer_amount: number; one_time_value: number;
-  delivery_cost: number; health: string;
+  delivery_cost: number; health: string; zoho_name: string | null;
 };
 
 /** jsonb arrives already parsed; anything else is treated as empty. */
@@ -68,6 +69,7 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     one_time_value: showValues ? row.one_time_value : null,
     delivery_cost: showValues ? row.delivery_cost : null,
     health: showValues ? (row.health as Health) : null,
+    zoho_name: showValues ? (row.zoho_name ?? null) : null,
   };
 }
 
