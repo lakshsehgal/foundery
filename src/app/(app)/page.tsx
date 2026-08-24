@@ -7,7 +7,7 @@ import { listClients, listSubmissions, reminders, costTotals, monthlyBurn } from
 import { fmtCompact, fmtMoney } from "@/lib/money";
 import { prettyDate, todayISO } from "@/lib/dates";
 import {
-  Card, CardTitle, EmptyState, PageBody, PageHeader, Pill, Redacted, StatTile,
+  avatarTint, Card, CardTitle, EmptyState, PageBody, PageHeader, Pill, Redacted, StatTile,
 } from "@/components/ui/primitives";
 
 export const metadata: Metadata = { title: "Today" };
@@ -166,10 +166,10 @@ export default async function TodayPage() {
                   <li key={client.id} className="flex items-center gap-2.5">
                     <span
                       aria-hidden
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      className="h-5 w-1 shrink-0 rounded-full"
                       style={{
                         background:
-                          client.status === "active" ? "var(--color-good)" : "var(--color-ink-3)",
+                          client.status === "active" ? avatarTint(String(client.id)) : "var(--color-ink-3)",
                       }}
                     />
                     <span className="min-w-0 flex-1 truncate text-[13px]">{client.name}</span>

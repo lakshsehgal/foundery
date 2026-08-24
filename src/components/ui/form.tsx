@@ -74,7 +74,7 @@ export function Button({
     <button
       {...rest}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-md)] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+      className={`inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-md)] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 ${
         size === "sm" ? "px-2.5 py-1.5 text-[12.5px]" : "px-3.5 py-2 text-[13px]"
       } ${variants[variant]} ${className}`}
     >

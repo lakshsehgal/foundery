@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Pencil, Plus, Search, Users } from "lucide-react";
 import { Button, Select, TextInput } from "@/components/ui/form";
 import {
-  Card, Chip, EmptyState, Redacted, TableWrap, Td, Th,
+  avatarTint, Card, Chip, EmptyState, Redacted, TableWrap, Td, Th,
 } from "@/components/ui/primitives";
 import { CLIENT_STATUS, ENGAGEMENT, HEALTH } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
@@ -123,6 +123,11 @@ export function ClientsView({
                   <tr key={client.id} className="transition-colors hover:bg-[var(--color-surface-2)]">
                     <Td>
                       <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          aria-hidden
+                          className="h-6 w-1 shrink-0 rounded-full"
+                          style={{ background: avatarTint(String(client.id)) }}
+                        />
                         <span className="min-w-0 truncate font-medium">{client.name}</span>
                         {client.vip && (
                           <span

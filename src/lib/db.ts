@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { cache } from "react";
 
 /**
  * The data layer.
@@ -241,12 +242,8 @@ export async function logAudit(
 }
 
 export async function getSetting(key: string, fallback: string): Promise<string> {
-  const db = await getDb();
-  const rows = await db.query<{ value: string }>(
-    `SELECT value FROM foundery.settings WHERE key = $1`,
-    [key],
-  );
-  return rows[0]?.value ?? fallback;
+  const settings = await getSettings();
+  return settings.get(key) ?? fallback;
 }
 
 export async function setSetting(key: string, value: string) {
@@ -258,11 +255,19 @@ export async function setSetting(key: string, value: string) {
   );
 }
 
-/** Every setting in one round trip, for code that needs several at once. */
-export async function getSettings(): Promise<Map<string, string>> {
+/**
+ * Every setting in one round trip, deduplicated per request.
+ *
+ * policyFor() reads settings, and a page calls policyFor() from several
+ * queries — without the React cache() wrapper that was three or four
+ * identical round trips to Mumbai per page load. Inside one server render
+ * they now share a single query; outside React (scripts, tests) cache() is
+ * a passthrough and this just runs.
+ */
+export const getSettings = cache(async (): Promise<Map<string, string>> => {
   const db = await getDb();
   const rows = await db.query<{ key: string; value: string }>(
     `SELECT key, value FROM foundery.settings`,
   );
   return new Map(rows.map((row) => [row.key, row.value]));
-}
+});

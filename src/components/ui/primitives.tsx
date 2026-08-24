@@ -436,7 +436,9 @@ export function PageBody({
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-5">
-      <div className="mx-auto space-y-4" style={{ maxWidth: width }}>
+      {/* .rise replays on every route change because the node remounts —
+          each navigation answers with motion instead of a hard swap. */}
+      <div className="rise mx-auto space-y-4" style={{ maxWidth: width }}>
         {children}
       </div>
     </div>
