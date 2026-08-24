@@ -7,7 +7,7 @@ import { markInvoicePaid } from "@/app/actions/invoices";
 import type { ActionState } from "@/app/actions/clients";
 import { Button, Select } from "@/components/ui/form";
 import {
-  Card, Chip, EmptyState, Redacted, TableWrap, Td, Th,
+  Card, EmptyState, Pill, Redacted, TableWrap, Td, Th,
 } from "@/components/ui/primitives";
 import { INVOICE_STATUS } from "@/lib/taxonomy";
 import type { InvoiceView } from "@/lib/queries";
@@ -140,7 +140,15 @@ export function InvoicesView({
               {shown.map((row) => {
                 const due = dueWording(row);
                 return (
-                  <tr key={row.id} className="transition-colors hover:bg-[var(--color-surface-2)]">
+                  <tr
+                    key={row.id}
+                    className="transition-colors hover:bg-[var(--color-surface-2)]"
+                    style={
+                      row.overdue
+                        ? { background: "color-mix(in srgb, var(--color-critical) 5%, transparent)" }
+                        : undefined
+                    }
+                  >
                     <Td>
                       <span className="font-medium">{row.number}</span>
                       {row.period && (
@@ -190,7 +198,9 @@ export function InvoicesView({
                       )}
                     </Td>
                     <Td>
-                      <Chip tone={INVOICE_STATUS[row.status].tone}>{INVOICE_STATUS[row.status].label}</Chip>
+                      <Pill fill={INVOICE_STATUS[row.status].tone}>
+                        {INVOICE_STATUS[row.status].label}
+                      </Pill>
                     </Td>
                     <Td align="right">
                       <div className="flex items-center justify-end gap-0.5">

@@ -43,7 +43,14 @@ export function EmptyState({
 }) {
   return (
     <div className="grid place-items-center px-6 py-14 text-center">
-      {icon && <div className="mb-3 text-[var(--color-ink-3)]">{icon}</div>}
+      {icon && (
+        <div
+          className="pop mb-4 grid h-14 w-14 place-items-center rounded-full text-[var(--color-brand-ink)]"
+          style={{ background: "var(--color-brand)" }}
+        >
+          {icon}
+        </div>
+      )}
       <p className="text-[14px] font-medium">{title}</p>
       {hint && <p className="mt-1 max-w-xs text-[12.5px] leading-relaxed text-[var(--color-ink-3)]">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -188,17 +195,31 @@ export function Pill({
  * for minutes-per-unit, down is up.
  */
 export function StatTile({
-  label, value, unit, delta, deltaGood, hint, accent, swatch,
+  label, value, unit, delta, deltaGood, hint, accent, swatch, tone, count,
 }: {
-  label: string; value: string | number; unit?: string;
+  label: string; value?: string | number; unit?: string;
   delta?: number | null; deltaGood?: "up" | "down";
   hint?: string; accent?: string; swatch?: string;
+  /** Tints the whole tile with a colour, monday-style. Any token. */
+  tone?: string;
+  /** A live number: counts up on arrival instead of appearing. */
+  count?: React.ReactNode;
 }) {
   const showDelta = delta != null && Number.isFinite(delta) && delta !== 0;
   const positive = showDelta && (deltaGood === "down" ? delta! < 0 : delta! > 0);
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
+    <div
+      className="lift rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] p-4"
+      style={
+        tone
+          ? {
+              background: `color-mix(in srgb, ${tone} 7%, var(--color-surface))`,
+              borderColor: `color-mix(in srgb, ${tone} 25%, var(--color-line))`,
+            }
+          : undefined
+      }
+    >
       <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.07em] text-[var(--color-ink-3)]">
         {swatch && (
           <span aria-hidden className="h-[7px] w-[12px] shrink-0 rounded-full" style={{ background: swatch }} />
@@ -207,10 +228,10 @@ export function StatTile({
       </p>
       <p className="mt-2 flex items-baseline gap-1.5">
         <span
-          className="text-[26px] font-semibold leading-none tracking-tight"
-          style={accent ? { color: accent } : undefined}
+          className="text-[28px] font-bold leading-none tracking-tight"
+          style={accent ? { color: accent } : tone ? { color: tone } : undefined}
         >
-          {value}
+          {count ?? value}
         </span>
         {unit && <span className="text-[12px] text-[var(--color-ink-3)]">{unit}</span>}
       </p>
@@ -371,8 +392,8 @@ export function BarRow({
           {pct.toFixed(0)}%
         </span>
       </div>
-      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-3)]">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone }} />
+      <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-3)]">
+        <div className="grow h-full rounded-full" style={{ width: `${pct}%`, background: tone }} />
       </div>
     </div>
   );
@@ -401,7 +422,7 @@ export function ProfitBars({
                 {positive && (
                   <div
                     title={point.hint}
-                    className="w-full max-w-[34px] rounded-t-[var(--radius-xs)]"
+                    className="grow-up w-full max-w-[34px] rounded-t-[var(--radius-xs)]"
                     style={{ height: Math.max(2, magnitude), background: "var(--color-good)" }}
                   />
                 )}
@@ -411,7 +432,7 @@ export function ProfitBars({
                 {!positive && (
                   <div
                     title={point.hint}
-                    className="w-full max-w-[34px] rounded-b-[var(--radius-xs)]"
+                    className="grow-down w-full max-w-[34px] rounded-b-[var(--radius-xs)]"
                     style={{ height: Math.max(2, magnitude), background: "var(--color-critical)" }}
                   />
                 )}

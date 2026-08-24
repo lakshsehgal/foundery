@@ -4,11 +4,13 @@ import { AlertTriangle, CalendarClock, CheckCircle2, FilePlus2, Inbox } from "lu
 import { requireRole } from "@/lib/auth";
 import { policyFor } from "@/lib/policy";
 import { listClients, listSubmissions, reminders, costTotals, monthlyBurn } from "@/lib/queries";
-import { fmtCompact, fmtMoney } from "@/lib/money";
+import { fmtMoney } from "@/lib/money";
 import { prettyDate, todayISO } from "@/lib/dates";
 import {
   avatarTint, Card, CardTitle, EmptyState, PageBody, PageHeader, Pill, Redacted, StatTile,
 } from "@/components/ui/primitives";
+import { Ticker } from "@/components/ui/ticker";
+import { defaultCurrency } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
@@ -53,28 +55,30 @@ export default async function TodayPage() {
       </PageHeader>
 
       <PageBody>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Active clients"
-            value={active.length}
+            count={<Ticker value={active.length} />}
+            tone="var(--color-series-1)"
             hint={`${active.filter((c) => c.vip).length} VIP · ${
               active.filter((c) => c.engagement === "retainer").length
             } on retainer`}
           />
           <StatTile
             label="Monthly cost base"
-            value={fmtCompact(burn)}
+            count={<Ticker value={burn} format="compact" currency={defaultCurrency()} />}
             hint={`Across ${totals.filter((c) => c.count > 0).length} categories`}
           />
           <StatTile
             label="Needs chasing"
-            value={overdueCount}
-            accent={overdueCount > 0 ? "var(--color-critical)" : undefined}
+            count={<Ticker value={overdueCount} />}
+            tone={overdueCount > 0 ? "var(--color-critical)" : "var(--color-good)"}
             hint={overdueCount > 0 ? "Invoices past their due date" : "Nothing is past due"}
           />
           <StatTile
             label="On the list"
-            value={feed.length}
+            count={<Ticker value={feed.length} />}
+            tone={feed.length > 0 ? "var(--color-warning)" : undefined}
             hint={feed.length === 0 ? "Clear" : "Things wanting attention this week"}
           />
         </div>
@@ -94,7 +98,7 @@ export default async function TodayPage() {
               hint="Every invoice is either paid or inside its terms, and this month's retainers have all been raised."
             />
           ) : (
-            <ul className="divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
+            <ul className="stagger divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
               {feed.map((item, index) => {
                 const style = KIND_STYLE[item.kind];
                 const Icon = style.icon;
@@ -102,7 +106,8 @@ export default async function TodayPage() {
                   <li key={`${item.kind}-${item.invoiceId ?? item.clientId}-${index}`}>
                     <Link
                       href="/invoices"
-                      className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--color-surface-2)]"
+                      className="flex items-start gap-3 border-l-[3px] px-4 py-3 transition-colors hover:bg-[var(--color-surface-2)]"
+                      style={{ borderLeftColor: style.tone }}
                     >
                       <span
                         aria-hidden

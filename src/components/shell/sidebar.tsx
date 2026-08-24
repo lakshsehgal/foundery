@@ -125,21 +125,14 @@ export function Sidebar({ role }: { role: Role }) {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           const Icon = item.icon;
           return (
-            <li key={item.href} className="relative">
-              {active && (
-                <span
-                  aria-hidden
-                  className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full"
-                  style={{ background: "var(--color-brand)" }}
-                />
-              )}
+            <li key={item.href}>
               <Link
                 href={item.href}
                 title={collapsed ? item.label : undefined}
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-2.5 rounded-[var(--radius-md)] py-2 text-[13px] transition-colors ${
                   active
-                    ? "bg-[var(--color-surface-3)] font-semibold text-[var(--color-ink)]"
+                    ? "bg-[var(--color-brand)] font-semibold text-[var(--color-brand-ink)]"
                     : "text-[var(--color-ink-2)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
                 } ${itemLayout}`}
               >

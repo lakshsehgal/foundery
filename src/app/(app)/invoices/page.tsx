@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
 import { policyFor } from "@/lib/policy";
 import { clientOptions, listInvoices, nextInvoiceNumber, reminders } from "@/lib/queries";
-import { defaultCurrency, fmtCompact, fmtMoney, symbolFor } from "@/lib/money";
+import { defaultCurrency, fmtMoney, symbolFor } from "@/lib/money";
 import { prettyDate, todayISO } from "@/lib/dates";
 import { PageBody, PageHeader, PolicyNote, StatTile } from "@/components/ui/primitives";
+import { Ticker } from "@/components/ui/ticker";
 import { InvoicesView, type InvoiceRowDisplay } from "./invoices-view";
 
 export const metadata: Metadata = { title: "Invoices" };
@@ -49,16 +50,29 @@ export default async function InvoicesPage() {
         subtitle={`${open.length} open · ${overdue.length} overdue${toRaise ? ` · ${toRaise} still to raise` : ""}`}
       />
       <PageBody width={1160}>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Owed to us"
-            value={policy.invoiceAmounts ? fmtCompact(outstanding, currency) : "—"}
+            count={
+              policy.invoiceAmounts ? (
+                <Ticker value={outstanding} format="compact" currency={currency} />
+              ) : (
+                "—"
+              )
+            }
+            tone="var(--color-series-1)"
             hint={`${open.length} invoice${open.length === 1 ? "" : "s"} open`}
           />
           <StatTile
             label="Past due"
-            value={policy.invoiceAmounts ? fmtCompact(overdueTotal, currency) : String(overdue.length)}
-            accent={overdue.length > 0 ? "var(--color-critical)" : undefined}
+            count={
+              policy.invoiceAmounts ? (
+                <Ticker value={overdueTotal} format="compact" currency={currency} />
+              ) : (
+                <Ticker value={overdue.length} />
+              )
+            }
+            tone={overdue.length > 0 ? "var(--color-critical)" : "var(--color-good)"}
             hint={
               overdue.length === 0
                 ? "Nothing has gone past its date"
@@ -67,13 +81,14 @@ export default async function InvoicesPage() {
           />
           <StatTile
             label="Still to raise"
-            value={toRaise}
-            accent={toRaise > 0 ? "var(--color-warning)" : undefined}
+            count={<Ticker value={toRaise} />}
+            tone={toRaise > 0 ? "var(--color-warning)" : undefined}
             hint={toRaise === 0 ? "This month is fully billed" : "Retainers not yet billed this month"}
           />
           <StatTile
             label="Settled"
-            value={invoices.filter((i) => i.status === "paid").length}
+            count={<Ticker value={invoices.filter((i) => i.status === "paid").length} />}
+            tone="var(--color-good)"
             hint="Paid in full, all time"
           />
         </div>

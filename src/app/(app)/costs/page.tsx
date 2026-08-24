@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
 import { policyFor } from "@/lib/policy";
 import { clientOptions, costTotals, listCosts, monthlyBurn } from "@/lib/queries";
-import { defaultCurrency, fmtCompact, fmtMoney, symbolFor } from "@/lib/money";
+import { defaultCurrency, fmtMoney, symbolFor } from "@/lib/money";
 import { CADENCES, CATEGORY_LABEL } from "@/lib/taxonomy";
 import { PageBody, PageHeader, PolicyNote, StatTile } from "@/components/ui/primitives";
+import { Ticker } from "@/components/ui/ticker";
 import { CostsView, type CostRowDisplay } from "./costs-view";
 
 export const metadata: Metadata = { title: "Costs" };
@@ -45,17 +46,24 @@ export default async function CostsPage() {
     <>
       <PageHeader title="Costs" subtitle={`${fmtMoney(burn, currency)} a month`} />
       <PageBody width={1060}>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Monthly cost base" value={fmtCompact(burn, currency)} hint="Everything, at its monthly rate" />
+        <div className="stagger grid gap-3 sm:grid-cols-3">
+          <StatTile
+            label="Monthly cost base"
+            count={<Ticker value={burn} format="compact" currency={currency} />}
+            tone="var(--color-series-2)"
+            hint="Everything, at its monthly rate"
+          />
           <StatTile
             label="People"
-            value={salaries ? fmtCompact(salaries.total, currency) : "—"}
+            count={salaries ? <Ticker value={salaries.total} format="compact" currency={currency} /> : "—"}
+            tone="var(--color-series-1)"
             hint={`${salaries?.count ?? 0} on payroll`}
-            swatch="var(--color-series-1)"
           />
           <StatTile
             label="Biggest slice"
-            value={biggest && burn > 0 ? `${((biggest.total / burn) * 100).toFixed(0)}%` : "—"}
+            count={
+              biggest && burn > 0 ? <Ticker value={(biggest.total / burn) * 100} format="pct" /> : "—"
+            }
             hint={biggest ? `${CATEGORY_LABEL[biggest.category]} lead the spend` : ""}
           />
         </div>

@@ -1,12 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Pencil, Plus, Search, Users } from "lucide-react";
+import { Crown, Plus, Search, Users } from "lucide-react";
 import { Button, Select, TextInput } from "@/components/ui/form";
-import {
-  avatarTint, Card, Chip, EmptyState, Redacted, TableWrap, Td, Th,
-} from "@/components/ui/primitives";
-import { CLIENT_STATUS, ENGAGEMENT, HEALTH } from "@/lib/taxonomy";
+import { avatarTint, Chip, EmptyState, Redacted } from "@/components/ui/primitives";
+import { CLIENT_STATUS, ENGAGEMENT, HEALTH, type ClientStatus } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
 import { ClientEditor } from "./client-editor";
 
@@ -17,6 +15,23 @@ export type ClientMoney = {
   margin: number | null;
 };
 
+const GROUPS: { status: ClientStatus; hint: string }[] = [
+  { status: "active", hint: "Being delivered right now" },
+  { status: "paused", hint: "On hold — keep them warm" },
+  { status: "churned", hint: "Gone, kept for the record" },
+];
+
+function marginTone(margin: number): string {
+  if (margin < 20) return "var(--color-critical)";
+  if (margin < 40) return "var(--color-warning)";
+  return "var(--color-good)";
+}
+
+/**
+ * The board. Each client is a card that owns a colour, grouped by status the
+ * way monday groups rows — the book of business readable at a glance, not a
+ * spreadsheet to be scanned.
+ */
 export function ClientsView({
   clients, canEditValues, currencySymbol, money,
 }: {
@@ -27,14 +42,16 @@ export function ClientsView({
   money: Record<number, ClientMoney>;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("active");
+  const [statusFilter, setStatusFilter] = useState("working");
   const [editing, setEditing] = useState<ClientView | null>(null);
   const [open, setOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return clients.filter((client) => {
-      if (status !== "all" && client.status !== status) return false;
+      if (statusFilter === "working" && client.status === "churned") return false;
+      if (statusFilter !== "working" && statusFilter !== "all" && client.status !== statusFilter)
+        return false;
       if (!needle) return true;
       return (
         client.name.toLowerCase().includes(needle) ||
@@ -42,12 +59,17 @@ export function ClientsView({
         client.services.some((service) => service.toLowerCase().includes(needle))
       );
     });
-  }, [clients, query, status]);
+  }, [clients, query, statusFilter]);
 
   function edit(client: ClientView | null) {
     setEditing(client);
     setOpen(true);
   }
+
+  const groups = GROUPS.map((group) => ({
+    ...group,
+    clients: filtered.filter((client) => client.status === group.status),
+  })).filter((group) => group.clients.length > 0);
 
   return (
     <>
@@ -65,16 +87,17 @@ export function ClientsView({
             className="pl-8"
           />
         </div>
-        <div className="w-[130px] shrink-0">
+        <div className="w-[150px] shrink-0">
           <Select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
             aria-label="Filter by status"
           >
+            <option value="working">In play</option>
             <option value="active">Active</option>
             <option value="paused">Paused</option>
             <option value="churned">Churned</option>
-            <option value="all">All</option>
+            <option value="all">Everyone</option>
           </Select>
         </div>
         <Button variant="primary" onClick={() => edit(null)} className="shrink-0">
@@ -83,15 +106,15 @@ export function ClientsView({
         </Button>
       </div>
 
-      <Card padded={false}>
-        {filtered.length === 0 ? (
+      {filtered.length === 0 ? (
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)]">
           <EmptyState
             icon={<Users size={22} />}
             title={clients.length === 0 ? "No clients yet" : "Nothing matches that"}
             hint={
               clients.length === 0
-                ? "Add the accounts you're running. Invoices, reminders and the founder numbers all read from this list."
-                : "Try a different search, or switch the status filter to all."
+                ? "Add the accounts you're running. Invoices, reminders and the founder numbers all read from this board."
+                : "Try a different search, or widen the filter."
             }
             action={
               clients.length === 0 ? (
@@ -102,39 +125,48 @@ export function ClientsView({
               ) : undefined
             }
           />
-        ) : (
-          <TableWrap>
-            <thead>
-              <tr>
-                <Th>Client</Th>
-                <Th>Services</Th>
-                <Th>Engagement</Th>
-                <Th align="right">Value</Th>
-                {canEditValues && <Th align="right">Margin</Th>}
-                <Th>Status</Th>
-                <Th align="right" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((client) => {
-                const figures = money[client.id];
+        </div>
+      ) : (
+        groups.map((group) => (
+          <section key={group.status}>
+            <div className="mb-2.5 flex items-baseline gap-2.5">
+              <h2
+                className="text-[13.5px] font-bold"
+                style={{ color: CLIENT_STATUS[group.status].tone }}
+              >
+                {CLIENT_STATUS[group.status].label}
+              </h2>
+              <span className="tabular text-[12px] font-semibold text-[var(--color-ink-3)]">
+                {group.clients.length}
+              </span>
+              <span className="text-[11.5px] text-[var(--color-ink-3)]">{group.hint}</span>
+            </div>
 
+            <div className="stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {group.clients.map((client) => {
+                const clientTone = avatarTint(String(client.id));
+                const figures = money[client.id];
                 return (
-                  <tr key={client.id} className="transition-colors hover:bg-[var(--color-surface-2)]">
-                    <Td>
+                  <button
+                    key={client.id}
+                    onClick={() => edit(client)}
+                    className="lift group overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] text-left"
+                  >
+                    {/* The client's colour, everywhere they appear. */}
+                    <div aria-hidden className="h-1.5 w-full" style={{ background: clientTone }} />
+
+                    <div className="p-4">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          aria-hidden
-                          className="h-6 w-1 shrink-0 rounded-full"
-                          style={{ background: avatarTint(String(client.id)) }}
-                        />
-                        <span className="min-w-0 truncate font-medium">{client.name}</span>
+                        <span className="min-w-0 truncate text-[15px] font-bold tracking-tight">
+                          {client.name}
+                        </span>
                         {client.vip && (
                           <span
                             title="VIP account"
-                            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[10.5px] font-semibold"
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold"
                             style={{ background: "var(--color-brand)", color: "var(--color-brand-ink)" }}
                           >
+                            <Crown size={10} aria-hidden />
                             VIP
                           </span>
                         )}
@@ -142,104 +174,73 @@ export function ClientsView({
                           <span
                             aria-label={HEALTH[client.health].label}
                             title={`${HEALTH[client.health].label} — ${HEALTH[client.health].hint}`}
-                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            className="ml-auto h-2.5 w-2.5 shrink-0 rounded-full"
                             style={{ background: HEALTH[client.health].tone }}
                           />
                         )}
                       </div>
-                      {client.owner && (
-                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-ink-3)]">{client.owner}</p>
-                      )}
-                    </Td>
 
-                    <Td>
-                      <div className="flex max-w-[260px] flex-wrap gap-1">
-                        {client.services.length === 0 ? (
-                          <span className="text-[12px] text-[var(--color-ink-3)]">—</span>
-                        ) : (
-                          client.services.slice(0, 3).map((service) => (
-                            <Chip key={service} tone="var(--color-ink-2)">
-                              {service}
-                            </Chip>
-                          ))
-                        )}
+                      <p className="mt-0.5 truncate text-[11.5px] text-[var(--color-ink-3)]">
+                        {ENGAGEMENT[client.engagement].short}
+                        {client.owner ? ` · ${client.owner}` : ""} · bills day {client.billing_day} ·
+                        net {client.terms_days}
+                      </p>
+
+                      <div className="mt-3 flex min-h-[22px] flex-wrap gap-1">
+                        {client.services.slice(0, 3).map((service) => (
+                          <Chip key={service} tone={clientTone}>
+                            {service}
+                          </Chip>
+                        ))}
                         {client.services.length > 3 && (
-                          <Chip
-                            tone="var(--color-ink-3)"
-                            title={client.services.slice(3).join(", ")}
-                          >
+                          <Chip tone="var(--color-ink-3)" title={client.services.slice(3).join(", ")}>
                             +{client.services.length - 3}
                           </Chip>
                         )}
                       </div>
-                    </Td>
 
-                    <Td>
-                      <span className="text-[12.5px]">{ENGAGEMENT[client.engagement].label}</span>
-                      <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
-                        Bills day {client.billing_day} · net {client.terms_days}
-                      </p>
-                    </Td>
-
-                    <Td align="right">
-                      {!figures ? (
-                        <Redacted />
-                      ) : (
-                        <>
-                          <span className="tabular font-medium">{figures.monthly}</span>
-                          {figures.total && (
-                            <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
-                              {figures.total} total
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </Td>
-
-                    {canEditValues && (
-                      <Td align="right">
-                        {!figures || figures.margin === null ? (
-                          <span className="text-[var(--color-ink-3)]">—</span>
+                      <div className="mt-3.5 flex items-end justify-between gap-2 border-t border-[var(--color-line)] pt-3">
+                        {figures ? (
+                          <>
+                            <div className="min-w-0">
+                              <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-[var(--color-ink-3)]">
+                                {client.engagement === "retainer" ? "Retainer / mo" : "Per month"}
+                              </p>
+                              <p className="tabular truncate text-[17px] font-bold tracking-tight">
+                                {figures.monthly}
+                              </p>
+                              {figures.total && (
+                                <p className="tabular text-[10.5px] text-[var(--color-ink-3)]">
+                                  {figures.total} total
+                                </p>
+                              )}
+                            </div>
+                            {figures.margin !== null && (
+                              <div className="shrink-0 text-right">
+                                <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-[var(--color-ink-3)]">
+                                  Margin
+                                </p>
+                                <p
+                                  className="tabular text-[17px] font-bold tracking-tight"
+                                  style={{ color: marginTone(figures.margin) }}
+                                >
+                                  {figures.margin.toFixed(0)}%
+                                </p>
+                              </div>
+                            )}
+                          </>
                         ) : (
-                          <span
-                            className="tabular font-medium"
-                            style={{
-                              color:
-                                figures.margin < 20
-                                  ? "var(--color-critical)"
-                                  : figures.margin < 40
-                                    ? "var(--color-warning)"
-                                    : "var(--color-good)",
-                            }}
-                          >
-                            {figures.margin.toFixed(0)}%
-                          </span>
+                          <Redacted />
                         )}
-                      </Td>
-                    )}
-
-                    <Td>
-                      <Chip tone={CLIENT_STATUS[client.status].tone}>
-                        {CLIENT_STATUS[client.status].label}
-                      </Chip>
-                    </Td>
-
-                    <Td align="right">
-                      <button
-                        onClick={() => edit(client)}
-                        aria-label={`Edit ${client.name}`}
-                        className="grid h-7 w-7 place-items-center rounded-[var(--radius-sm)] text-[var(--color-ink-3)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-ink)]"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    </Td>
-                  </tr>
+                      </div>
+                    </div>
+                  </button>
                 );
               })}
-            </tbody>
-          </TableWrap>
-        )}
-      </Card>
+            </div>
+          </section>
+        ))
+      )}
 
       <ClientEditor
         key={editing?.id ?? "new"}

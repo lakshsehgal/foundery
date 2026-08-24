@@ -206,6 +206,46 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   letter-spacing: -0.015em;
 }
 
+/* Bars grow in from zero — data arriving should feel like data arriving. */
+@keyframes ui-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@utility grow { animation: ui-grow 0.6s var(--ease-out-quick) both; transform-origin: left; }
+
+@keyframes ui-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@utility grow-up { animation: ui-grow-y 0.5s var(--ease-out-quick) both; transform-origin: bottom; }
+@utility grow-down { animation: ui-grow-y 0.5s var(--ease-out-quick) both; transform-origin: top; }
+
+@keyframes ui-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@utility pop { animation: ui-pop 0.35s var(--ease-out-quick) both; }
+
+/* Cards that respond to the hand: lift on hover, settle on press. */
+.lift {
+  transition:
+    transform 0.16s var(--ease-out-quick),
+    box-shadow 0.16s var(--ease-out-quick),
+    border-color 0.16s var(--ease-out-quick);
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+  border-color: var(--color-line-strong);
+}
+.lift:active { transform: translateY(0) scale(0.99); }
+
+/* Children pop in one after another — lists feel dealt, not dumped. */
+.stagger > * { animation: ui-pop 0.35s var(--ease-out-quick) both; }
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(7) { animation-delay: 240ms; }
+.stagger > *:nth-child(8) { animation-delay: 280ms; }
+.stagger > *:nth-child(n + 9) { animation-delay: 320ms; }
+
 /* Swap light/dark logo lockups without a client-side theme check. */
 :root[data-theme="dark"] .dark-hidden { display: none; }
 :root[data-theme="dark"] .dark-shown  { display: block; }

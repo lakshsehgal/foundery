@@ -9,6 +9,7 @@ import {
   BarRow, Card, CardTitle, Chip, PageBody, PageHeader, ProfitBars, StatTile,
   TableWrap, Td, Th,
 } from "@/components/ui/primitives";
+import { Ticker } from "@/components/ui/ticker";
 
 export const metadata: Metadata = { title: "Founder dashboard" };
 export const dynamic = "force-dynamic";
@@ -60,26 +61,30 @@ export default async function FounderPage() {
     <>
       <PageHeader title="Founder dashboard" subtitle="Margins, what's coming, and what could go wrong" />
       <PageBody width={1120}>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Monthly revenue"
-            value={fmtCompact(head.mrr, currency)}
+            count={<Ticker value={head.mrr} format="compact" currency={currency} />}
+            tone="var(--color-series-1)"
             hint={`${head.activeClients} active · ${head.vipClients} VIP`}
           />
           <StatTile
             label="Monthly cost base"
-            value={fmtCompact(head.burn, currency)}
+            count={<Ticker value={head.burn} format="compact" currency={currency} />}
+            tone="var(--color-series-2)"
             hint="Salaries, tools, contractors, everything"
           />
           <StatTile
             label="Net profit / month"
-            value={fmtCompact(head.netProfit, currency)}
-            accent={head.netProfit < 0 ? "var(--color-critical)" : "var(--color-good)"}
+            count={<Ticker value={head.netProfit} format="compact" currency={currency} />}
+            tone={head.netProfit < 0 ? "var(--color-critical)" : "var(--color-good)"}
             hint={head.netMarginPct === null ? "No revenue to divide by" : `${fmtPct(head.netMarginPct, 0)} margin`}
           />
           <StatTile
             label="Runway"
-            value={head.runwayMonths === null ? "—" : head.runwayMonths.toFixed(1)}
+            count={
+              head.runwayMonths === null ? "—" : <Ticker value={head.runwayMonths} digits={1} />
+            }
             unit={head.runwayMonths === null ? undefined : "months"}
             hint={
               head.runwayMonths === null
@@ -114,11 +119,15 @@ export default async function FounderPage() {
 
           <p className="mb-4 text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">{band.line}</p>
 
-          <ul className="space-y-2.5">
+          <ul className="stagger space-y-2.5">
             {risk.findings.map((finding) => (
               <li
                 key={finding.key}
-                className="flex flex-wrap items-start gap-3 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2.5"
+                className="flex flex-wrap items-start gap-3 rounded-[var(--radius-md)] border-l-[3px] px-3 py-2.5"
+                style={{
+                  borderLeftColor: SEVERITY_TONE[finding.severity],
+                  background: `color-mix(in srgb, ${SEVERITY_TONE[finding.severity]} 7%, var(--color-surface-2))`,
+                }}
               >
                 <span
                   aria-hidden

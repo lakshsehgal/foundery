@@ -2,11 +2,12 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { requireFounder } from "@/lib/auth";
 import { pnl, pnlTotals } from "@/lib/analytics";
-import { defaultCurrency, fmtCompact, fmtMoney, fmtPct, symbolFor } from "@/lib/money";
+import { defaultCurrency, fmtMoney, fmtPct, symbolFor } from "@/lib/money";
 import { monthKey } from "@/lib/dates";
 import {
   Card, CardTitle, PageBody, PageHeader, ProfitBars, StatTile, TableWrap, Td, Th,
 } from "@/components/ui/primitives";
+import { Ticker } from "@/components/ui/ticker";
 import { BasisToggle } from "./basis-toggle";
 import { MonthEditor } from "./month-editor";
 
@@ -39,17 +40,23 @@ export default async function PnlPage({
       </PageHeader>
 
       <PageBody width={1120}>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label={`Revenue · ${totals.months} months`}
-            value={fmtCompact(totals.revenue, currency)}
+            count={<Ticker value={totals.revenue} format="compact" currency={currency} />}
+            tone="var(--color-series-1)"
             hint={basis === "invoiced" ? "Counted when invoiced" : "Counted when banked"}
           />
-          <StatTile label="Costs" value={fmtCompact(totals.costs, currency)} hint="Everything that went out" />
+          <StatTile
+            label="Costs"
+            count={<Ticker value={totals.costs} format="compact" currency={currency} />}
+            tone="var(--color-series-2)"
+            hint="Everything that went out"
+          />
           <StatTile
             label="Profit after tax"
-            value={fmtCompact(totals.profit, currency)}
-            accent={totals.profit < 0 ? "var(--color-critical)" : "var(--color-good)"}
+            count={<Ticker value={totals.profit} format="compact" currency={currency} />}
+            tone={totals.profit < 0 ? "var(--color-critical)" : "var(--color-good)"}
             hint={totals.marginPct === null ? "No revenue recorded" : `${fmtPct(totals.marginPct, 0)} margin`}
           />
           <StatTile
