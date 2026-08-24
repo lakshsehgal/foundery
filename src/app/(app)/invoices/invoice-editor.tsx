@@ -24,9 +24,11 @@ export function InvoiceEditor({
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(saveInvoice, {});
   const [removeState, removeAction, removing] = useActionState<ActionState, FormData>(deleteInvoice, {});
+  // The parent gives this component a key per invoice, so opening a different
+  // one remounts it and this initialiser runs again. That is React's answer to
+  // "reset state when the props change" — syncing it back in an effect costs a
+  // second render and can show the previous invoice's status for a frame.
   const [status, setStatus] = useState<InvoiceStatus>(invoice?.status ?? "draft");
-
-  useEffect(() => setStatus(invoice?.status ?? "draft"), [invoice, open]);
 
   useEffect(() => {
     if (state.ok) {

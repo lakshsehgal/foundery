@@ -35,12 +35,11 @@ export function FormEditor({
   starterFields: OnboardingField[];
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(saveForm, {});
-  const [fields, setFields] = useState<Draft[]>([]);
-
-  useEffect(() => {
-    if (!open) return;
-    setFields((form?.fields ?? starterFields).map(withUid));
-  }, [open, form, starterFields]);
+  // Keyed by the form being edited from the parent, so this initialiser runs
+  // afresh each time the dialog opens on a different form.
+  const [fields, setFields] = useState<Draft[]>(() =>
+    (form?.fields ?? starterFields).map(withUid),
+  );
 
   useEffect(() => {
     if (state.ok) {

@@ -7,7 +7,7 @@ import path from "node:path";
  * touches the database is imported — db.ts resolves the path once, at first
  * open, and caches the handle on globalThis.
  */
-export function useTempDb(name: string): string {
+export function setupTempDb(name: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `foundery-${name}-`));
   const file = path.join(dir, "test.db");
   process.env.FOUNDERY_DB_PATH = file;

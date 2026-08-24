@@ -215,6 +215,7 @@ export function InvoicesView({
       </Card>
 
       <InvoiceEditor
+        key={editing?.id ?? "new"}
         open={open}
         onClose={() => setOpen(false)}
         invoice={editing}

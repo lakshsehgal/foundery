@@ -18,21 +18,19 @@ export type MonthDraft = {
   closed: boolean;
 };
 
+/**
+ * The trigger owns whether the dialog is open; the dialog owns the submission.
+ * Splitting them keeps the "it saved, so close" effect on the far side of a
+ * prop boundary — same shape as every other editor in the app — and remounting
+ * the dialog per open resets any error left over from last time.
+ */
 export function MonthEditor({ month, currencySymbol }: { month: MonthDraft; currencySymbol: string }) {
-  const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<ActionState, FormData>(savePnlMonth, {});
-
-  useEffect(() => {
-    if (state.ok) {
-      toast.success(state.ok);
-      setOpen(false);
-    }
-  }, [state]);
+  const [openedAt, setOpenedAt] = useState(0);
 
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => setOpenedAt((count) => count + 1)}
         aria-label={`Adjust ${month.label}`}
         title={`Adjust ${month.label}`}
         className="grid h-7 w-7 place-items-center rounded-[var(--radius-sm)] text-[var(--color-ink-3)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-ink)]"
@@ -40,9 +38,36 @@ export function MonthEditor({ month, currencySymbol }: { month: MonthDraft; curr
         <Pencil size={13} />
       </button>
 
+      {openedAt > 0 && (
+        <MonthDialog
+          key={openedAt}
+          month={month}
+          currencySymbol={currencySymbol}
+          onClose={() => setOpenedAt(0)}
+        />
+      )}
+    </>
+  );
+}
+
+function MonthDialog({
+  month, currencySymbol, onClose,
+}: {
+  month: MonthDraft; currencySymbol: string; onClose: () => void;
+}) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(savePnlMonth, {});
+
+  useEffect(() => {
+    if (state.ok) {
+      toast.success(state.ok);
+      onClose();
+    }
+  }, [state, onClose]);
+
+  return (
       <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
+        open
+        onClose={onClose}
         title={month.label}
         description="Everything invoiced and everything spent is already counted. This is for the bits that aren't."
         width={520}
@@ -120,7 +145,7 @@ export function MonthEditor({ month, currencySymbol }: { month: MonthDraft; curr
           )}
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+            <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" loading={pending}>
@@ -129,6 +154,5 @@ export function MonthEditor({ month, currencySymbol }: { month: MonthDraft; curr
           </DialogFooter>
         </form>
       </Dialog>
-    </>
   );
 }

@@ -237,6 +237,7 @@ export function ClientsView({
       </Card>
 
       <ClientEditor
+        key={editing?.id ?? "new"}
         open={open}
         onClose={() => setOpen(false)}
         client={editing}

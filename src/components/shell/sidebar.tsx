@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   BadgeIndianRupee, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, LineChart,
   Lock, LogOut, Moon, Receipt, Settings, Sun, Users, Wallet,
@@ -29,31 +29,68 @@ const ITEMS: Item[] = [
   { href: "/settings", label: "Settings", icon: Settings, founderOnly: true },
 ];
 
+/**
+ * Theme and rail width live in the browser — on `<html data-theme>` and in
+ * localStorage — not in React. Reading them with useSyncExternalStore means
+ * the server renders the documented default and the client corrects itself in
+ * the same commit, instead of rendering once and then setting state in an
+ * effect to render again.
+ */
+const PREFS_EVENT = "foundery:prefs";
+
+function subscribePrefs(onChange: () => void) {
+  window.addEventListener(PREFS_EVENT, onChange);
+  // Another tab changing the preference should move this one too.
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(PREFS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function readPref(key: string, value: string): boolean {
+  try {
+    return localStorage.getItem(key) === value;
+  } catch {
+    // Storage can throw outright in a locked-down browser. Fall back to the
+    // default rather than taking the sidebar down with it.
+    return false;
+  }
+}
+
+function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Nothing to do — the change still applies for this page view.
+  }
+  window.dispatchEvent(new Event(PREFS_EVENT));
+}
+
 export function Sidebar({ role }: { role: Role }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
 
-  useEffect(() => {
-    if (document.documentElement.getAttribute("data-theme") === "dark") setTheme("dark");
-    setCollapsed(localStorage.getItem("foundery-rail") === "1");
+  const collapsed = useSyncExternalStore(
+    subscribePrefs,
+    () => readPref("foundery-rail", "1"),
+    () => false, // the server can't know; expanded is the documented default
+  );
+
+  const theme = useSyncExternalStore(
+    subscribePrefs,
+    () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"),
+    () => "light" as const,
+  );
+
+  const toggleTheme = useCallback(() => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    writePref("foundery-theme", next);
   }, []);
 
-  function toggleTheme() {
-    setTheme((value) => {
-      const next = value === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      localStorage.setItem("foundery-theme", next);
-      return next;
-    });
-  }
-
-  function toggleRail() {
-    setCollapsed((value) => {
-      localStorage.setItem("foundery-rail", value ? "0" : "1");
-      return !value;
-    });
-  }
+  const toggleRail = useCallback(() => {
+    writePref("foundery-rail", readPref("foundery-rail", "1") ? "0" : "1");
+  }, []);
 
   const visible = ITEMS.filter((item) => !item.founderOnly || role === "founder");
 

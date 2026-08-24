@@ -1,8 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { useTempDb, TODAY } from "./helpers.mjs";
+import { setupTempDb, TODAY } from "./helpers.mjs";
 
-useTempDb("redaction");
+setupTempDb("redaction");
 
 const { getDb, setSetting } = await import("../src/lib/db");
 const { listClients, listCosts, costTotals, listInvoices, reminders } = await import("../src/lib/queries");
@@ -178,7 +178,7 @@ describe("reminders", () => {
 
   test("overdue sorts ahead of due-soon", () => {
     const kinds = reminders("founder", TODAY).map((item) => item.kind);
-    assert.deepEqual(kinds, [...kinds].sort((a, b) => (a === "overdue" ? -1 : 1)));
+    assert.deepEqual(kinds, [...kinds].sort((a) => (a === "overdue" ? -1 : 1)));
     assert.equal(kinds[0], "overdue");
   });
 });

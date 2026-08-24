@@ -171,6 +171,7 @@ export function OnboardingView({
       )}
 
       <FormEditor
+        key={editing?.id ?? "new"}
         open={open}
         onClose={() => setOpen(false)}
         form={editing}

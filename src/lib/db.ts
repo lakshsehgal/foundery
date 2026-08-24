@@ -7,7 +7,6 @@ import path from "node:path";
  * reloading doesn't open a new file handle on every request.
  */
 declare global {
-  // eslint-disable-next-line no-var
   var __founderyDb: Database.Database | undefined;
 }
 

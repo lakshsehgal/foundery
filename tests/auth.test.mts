@@ -1,8 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { useTempDb } from "./helpers.mjs";
+import { setupTempDb } from "./helpers.mjs";
 
-useTempDb("auth");
+setupTempDb("auth");
 
 const { issueToken, verifyToken, roleForPasscode, newPublicToken, safeEqual, SESSION_TTL_MS } =
   await import("../src/lib/session");

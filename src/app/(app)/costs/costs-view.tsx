@@ -199,6 +199,7 @@ export function CostsView({
 
       {canEdit && (
         <CostEditor
+          key={editing?.id ?? "new"}
           open={open}
           onClose={() => setOpen(false)}
           cost={editing}

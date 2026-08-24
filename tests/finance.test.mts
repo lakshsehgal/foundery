@@ -1,8 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { useTempDb } from "./helpers.mjs";
+import { setupTempDb } from "./helpers.mjs";
 
-useTempDb("finance");
+setupTempDb("finance");
 
 const { getDb } = await import("../src/lib/db");
 const { costsForMonth, monthlyBurn } = await import("../src/lib/queries");
