@@ -1,0 +1,35 @@
+{
+  "name": "foundery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Foundery \u2014 Neuroid founders dashboard",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx scripts/seed.ts",
+    "reset": "rm -f data/foundery.db && npm run seed",
+    "test": "node --conditions=react-server --import tsx --test \"tests/*.test.mts\""
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "better-sqlite3": "^11.10.0",
+    "lucide-react": "^1.34.0",
+    "next": "^16.3.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "server-only": "^0.0.1",
+    "sonner": "^2.0.8",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

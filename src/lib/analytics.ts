@@ -1,0 +1,442 @@
+import "server-only";
+import { getDb, getSetting } from "./db";
+import { costsForMonth, costTotals, monthlyBurn } from "./queries";
+import { lastMonths, monthKey, monthLabel, todayISO } from "./dates";
+import type { CostCategory, Health } from "./taxonomy";
+import { marginPct, spreadProject } from "./economics";
+
+/**
+ * Founder-only maths. Nothing here is called from an operator screen — the
+ * route guard is the fence, and these functions carry no redaction of their
+ * own precisely so that fence stays the only thing to check.
+ */
+
+/* ---------------------------------------------------------------- clients */
+
+export type ClientEconomics = {
+  id: number;
+  name: string;
+  vip: boolean;
+  engagement: string;
+  health: Health;
+  /** Monthly recognised revenue. A project is spread over its live months. */
+  mrr: number;
+  deliveryCost: number;
+  grossProfit: number;
+  /** null rather than a confident 0 when there is no revenue to divide by. */
+  marginPct: number | null;
+  shareOfRevenuePct: number;
+};
+
+export function clientEconomics(): ClientEconomics[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, name, vip, engagement, health, retainer_amount, one_time_value,
+              delivery_cost, start_date, end_date
+       FROM clients WHERE status = 'active'`,
+    )
+    .all() as {
+      id: number; name: string; vip: number; engagement: string; health: string;
+      retainer_amount: number; one_time_value: number; delivery_cost: number;
+      start_date: string | null; end_date: string | null;
+    }[];
+
+  const priced = rows.map((row) => {
+    const mrr =
+      row.engagement === "retainer"
+        ? row.retainer_amount
+        : spreadProject(row.one_time_value, row.start_date, row.end_date);
+    const grossProfit = mrr - row.delivery_cost;
+    return {
+      id: row.id,
+      name: row.name,
+      vip: row.vip === 1,
+      engagement: row.engagement,
+      health: row.health as Health,
+      mrr,
+      deliveryCost: row.delivery_cost,
+      grossProfit,
+      marginPct: marginPct(mrr, row.delivery_cost),
+      shareOfRevenuePct: 0,
+    };
+  });
+
+  const total = priced.reduce((sum, c) => sum + c.mrr, 0);
+  for (const client of priced) {
+    client.shareOfRevenuePct = total > 0 ? (client.mrr / total) * 100 : 0;
+  }
+  return priced.sort((a, b) => b.mrr - a.mrr);
+}
+
+/* --------------------------------------------------------------- headline */
+
+export type Headline = {
+  mrr: number;
+  burn: number;
+  grossProfit: number;
+  netProfit: number;
+  netMarginPct: number | null;
+  deliveryCost: number;
+  activeClients: number;
+  vipClients: number;
+  /** Months of cost the cash buffer covers. null when no buffer is recorded. */
+  runwayMonths: number | null;
+  cashBuffer: number | null;
+};
+
+export function headline(): Headline {
+  const economics = clientEconomics();
+  const mrr = economics.reduce((sum, c) => sum + c.mrr, 0);
+  const deliveryCost = economics.reduce((sum, c) => sum + c.deliveryCost, 0);
+  const burn = monthlyBurn();
+  const netProfit = mrr - burn;
+  const bufferRaw = getSetting("cash_buffer", "");
+  const cashBuffer = bufferRaw === "" ? null : Number(bufferRaw);
+
+  return {
+    mrr,
+    burn,
+    grossProfit: mrr - deliveryCost,
+    netProfit,
+    netMarginPct: mrr > 0 ? (netProfit / mrr) * 100 : null,
+    deliveryCost,
+    activeClients: economics.length,
+    vipClients: economics.filter((c) => c.vip).length,
+    runwayMonths:
+      cashBuffer !== null && burn > 0 ? cashBuffer / burn : null,
+    cashBuffer,
+  };
+}
+
+/* ------------------------------------------------------------- projection */
+
+export type ProjectedMonth = {
+  month: string;
+  label: string;
+  revenue: number;
+  costs: number;
+  profit: number;
+  /** Confidence shrinks the further out we look. */
+  confidence: "booked" | "likely" | "assumed";
+};
+
+/**
+ * Forward revenue from contracts that already exist — no growth assumption
+ * baked in. A retainer counts until its end date; a project stops when it
+ * ships. Anything past a client's end date simply isn't there, which is the
+ * point: the shape of the curve shows the cliff before it arrives.
+ */
+export function projection(months = 6): ProjectedMonth[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT engagement, retainer_amount, one_time_value, start_date, end_date
+       FROM clients WHERE status IN ('active','paused')`,
+    )
+    .all() as {
+      engagement: string; retainer_amount: number; one_time_value: number;
+      start_date: string | null; end_date: string | null;
+    }[];
+
+  const burn = monthlyBurn();
+  const start = new Date();
+  const out: ProjectedMonth[] = [];
+
+  for (let i = 0; i < months; i++) {
+    const date = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const key = monthKey(date);
+    let revenue = 0;
+    for (const row of rows) {
+      if (row.end_date && row.end_date.slice(0, 7) < key) continue;
+      if (row.start_date && row.start_date.slice(0, 7) > key) continue;
+      revenue +=
+        row.engagement === "retainer"
+          ? row.retainer_amount
+          : spreadProject(row.one_time_value, row.start_date, row.end_date);
+    }
+    out.push({
+      month: key,
+      label: monthLabel(key),
+      revenue,
+      costs: burn,
+      profit: revenue - burn,
+      confidence: i === 0 ? "booked" : i <= 2 ? "likely" : "assumed",
+    });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------- risk */
+
+export type RiskFinding = {
+  key: string;
+  title: string;
+  detail: string;
+  severity: "good" | "warning" | "serious" | "critical";
+  /** The number the finding is about, already formatted by the caller. */
+  metric: string;
+  /** What to actually do about it. */
+  action: string;
+};
+
+export type RiskReport = {
+  score: number;              // 0 (calm) … 100 (on fire)
+  band: "steady" | "watch" | "exposed";
+  findings: RiskFinding[];
+};
+
+const SEVERITY_WEIGHT = { good: 0, warning: 8, serious: 18, critical: 30 };
+
+/**
+ * The five ways a small agency actually gets hurt: one client is too much of
+ * the revenue, the money is late, the margin is thin, the cost base is fixed
+ * while the revenue isn't, and an account is quietly on its way out. Each is
+ * scored on its own and the report is the sum, capped — one critical finding
+ * shouldn't be averaged away by four calm ones.
+ */
+export function riskReport(today = todayISO()): RiskReport {
+  const findings: RiskFinding[] = [];
+  const economics = clientEconomics();
+  const totalMrr = economics.reduce((sum, c) => sum + c.mrr, 0);
+
+  // 1 — Revenue concentration.
+  const top = economics[0];
+  if (!top || totalMrr <= 0) {
+    findings.push({
+      key: "concentration",
+      title: "No active revenue recorded",
+      detail: "Nothing to concentrate. Add clients with values to make this meaningful.",
+      severity: "warning",
+      metric: "—",
+      action: "Add your active clients and their retainer values.",
+    });
+  } else {
+    const share = (top.mrr / totalMrr) * 100;
+    const severity = share >= 50 ? "critical" : share >= 35 ? "serious" : share >= 25 ? "warning" : "good";
+    findings.push({
+      key: "concentration",
+      title: `${top.name} is ${share.toFixed(0)}% of monthly revenue`,
+      detail:
+        severity === "good"
+          ? "No single client dominates the book."
+          : `Losing them costs ${share.toFixed(0)}% of revenue in one notice period.`,
+      severity,
+      metric: `${share.toFixed(0)}%`,
+      action:
+        severity === "good"
+          ? "Nothing to do."
+          : "Get the next two accounts up, or lock a longer term with them.",
+    });
+  }
+
+  // 2 — Money owed and late.
+  const receivables = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(amount - amount_paid), 0) AS outstanding,
+              COALESCE(SUM(CASE WHEN due_date < ? THEN amount - amount_paid ELSE 0 END), 0) AS overdue,
+              COUNT(CASE WHEN due_date < ? AND status NOT IN ('paid','void') THEN 1 END) AS overdueCount
+       FROM invoices WHERE status NOT IN ('paid','void')`,
+    )
+    .get(today, today) as { outstanding: number; overdue: number; overdueCount: number };
+
+  const burn = monthlyBurn();
+  const overdueMonths = burn > 0 ? receivables.overdue / burn : 0;
+  const receivableSeverity =
+    overdueMonths >= 1 ? "critical" : overdueMonths >= 0.5 ? "serious" : receivables.overdue > 0 ? "warning" : "good";
+  findings.push({
+    key: "receivables",
+    title:
+      receivables.overdueCount > 0
+        ? `${receivables.overdueCount} invoice${receivables.overdueCount === 1 ? "" : "s"} past due`
+        : "Nothing overdue",
+    detail:
+      receivables.overdue > 0
+        ? `That is ${overdueMonths.toFixed(1)} months of running costs sitting in someone else's account.`
+        : "Everything raised is either paid or still inside terms.",
+    severity: receivableSeverity,
+    metric: receivables.overdue > 0 ? `${overdueMonths.toFixed(1)}× burn` : "0",
+    action: receivables.overdue > 0 ? "Chase the oldest one today, before the newest." : "Nothing to do.",
+  });
+
+  // 3 — Margin.
+  const head = headline();
+  const marginSeverity =
+    head.netMarginPct === null
+      ? "warning"
+      : head.netMarginPct < 0
+        ? "critical"
+        : head.netMarginPct < 15
+          ? "serious"
+          : head.netMarginPct < 30
+            ? "warning"
+            : "good";
+  findings.push({
+    key: "margin",
+    title:
+      head.netMarginPct === null
+        ? "Margin can't be calculated yet"
+        : head.netMarginPct < 0
+          ? "Running at a loss"
+          : `Net margin is ${head.netMarginPct.toFixed(0)}%`,
+    detail:
+      head.netMarginPct === null
+        ? "No revenue recorded against the cost base."
+        : "Monthly revenue against the full cost base, delivery and overhead together.",
+    severity: marginSeverity,
+    metric: head.netMarginPct === null ? "—" : `${head.netMarginPct.toFixed(0)}%`,
+    action:
+      marginSeverity === "good"
+        ? "Nothing to do."
+        : "Either the thin accounts get repriced or the cost base comes down.",
+  });
+
+  // 4 — Fixed-cost load. Salaries can't be switched off in a bad month.
+  const totals = costTotals();
+  const fixed = totals
+    .filter((t) => (["salary", "other"] as CostCategory[]).includes(t.category))
+    .reduce((sum, t) => sum + t.total, 0);
+  const fixedShare = burn > 0 ? (fixed / burn) * 100 : 0;
+  const fixedSeverity = fixedShare >= 75 ? "serious" : fixedShare >= 60 ? "warning" : "good";
+  findings.push({
+    key: "fixed_costs",
+    title: `${fixedShare.toFixed(0)}% of the cost base is fixed`,
+    detail:
+      fixedSeverity === "good"
+        ? "Enough of the spend is variable to absorb a slow month."
+        : "Salaries and overhead don't flex when revenue dips.",
+    severity: fixedSeverity,
+    metric: `${fixedShare.toFixed(0)}%`,
+    action: fixedSeverity === "good" ? "Nothing to do." : "Keep more delivery on contractors until the book is deeper.",
+  });
+
+  // 5 — Accounts flagged as wobbling.
+  const atRisk = economics.filter((c) => c.health === "red" || c.health === "amber");
+  const atRiskMrr = atRisk.reduce((sum, c) => sum + c.mrr, 0);
+  const atRiskShare = totalMrr > 0 ? (atRiskMrr / totalMrr) * 100 : 0;
+  const healthSeverity =
+    atRiskShare >= 40 ? "critical" : atRiskShare >= 20 ? "serious" : atRiskShare > 0 ? "warning" : "good";
+  findings.push({
+    key: "health",
+    title:
+      atRisk.length === 0
+        ? "Every account is healthy"
+        : `${atRisk.length} account${atRisk.length === 1 ? "" : "s"} flagged, ${atRiskShare.toFixed(0)}% of revenue`,
+    detail:
+      atRisk.length === 0
+        ? "Nothing flagged amber or red."
+        : atRisk.map((c) => c.name).join(", "),
+    severity: healthSeverity,
+    metric: `${atRiskShare.toFixed(0)}%`,
+    action: atRisk.length === 0 ? "Nothing to do." : "Book the calls this week, not next.",
+  });
+
+  const score = Math.min(
+    100,
+    findings.reduce((sum, f) => sum + SEVERITY_WEIGHT[f.severity], 0),
+  );
+  return {
+    score,
+    band: score >= 55 ? "exposed" : score >= 25 ? "watch" : "steady",
+    findings,
+  };
+}
+
+/* -------------------------------------------------------------------- P&L */
+
+export type PnlMonth = {
+  month: string;
+  label: string;
+  /** Everything invoiced with an issue date in the month. */
+  invoiced: number;
+  /** Everything actually banked in the month. */
+  collected: number;
+  otherIncome: number;
+  costs: number;
+  oneOffCosts: number;
+  revenue: number;
+  profitBeforeTax: number;
+  tax: number;
+  /** The stored rate, as a percentage — kept so the editor round-trips it. */
+  taxRatePct: number;
+  profit: number;
+  marginPct: number | null;
+  closed: boolean;
+  notes: string | null;
+  /** False when the month has no invoices and no costs — show "—", not zero. */
+  hasData: boolean;
+};
+
+export function pnl(months = 12, basis: "invoiced" | "collected" = "invoiced"): PnlMonth[] {
+  const keys = lastMonths(months);
+  const db = getDb();
+
+  return keys.map((month) => {
+    const invoiced = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(amount), 0) AS total FROM invoices
+           WHERE status != 'void' AND substr(issue_date, 1, 7) = ?`,
+        )
+        .get(month) as { total: number }
+    ).total;
+
+    const collected = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(amount_paid), 0) AS total FROM invoices
+           WHERE status != 'void' AND paid_date IS NOT NULL AND substr(paid_date, 1, 7) = ?`,
+        )
+        .get(month) as { total: number }
+    ).total;
+
+    const manual = db
+      .prepare(`SELECT * FROM pnl_months WHERE month = ?`)
+      .get(month) as
+      | { other_income: number; one_off_costs: number; tax_rate: number; notes: string | null; closed: number }
+      | undefined;
+
+    const otherIncome = manual?.other_income ?? 0;
+    const oneOffCosts = manual?.one_off_costs ?? 0;
+    const costs = costsForMonth(month) + oneOffCosts;
+    const revenue = (basis === "invoiced" ? invoiced : collected) + otherIncome;
+    const profitBeforeTax = revenue - costs;
+    const taxRate = manual?.tax_rate ?? 0;
+    const tax = profitBeforeTax > 0 ? profitBeforeTax * taxRate : 0;
+
+    return {
+      month,
+      label: monthLabel(month),
+      invoiced,
+      collected,
+      otherIncome,
+      costs,
+      oneOffCosts,
+      revenue,
+      profitBeforeTax,
+      tax,
+      taxRatePct: taxRate * 100,
+      profit: profitBeforeTax - tax,
+      marginPct: revenue > 0 ? ((profitBeforeTax - tax) / revenue) * 100 : null,
+      closed: manual?.closed === 1,
+      notes: manual?.notes ?? null,
+      hasData: invoiced > 0 || collected > 0 || costs > 0 || otherIncome > 0,
+    };
+  });
+}
+
+export function pnlTotals(rows: PnlMonth[]) {
+  const live = rows.filter((r) => r.hasData);
+  const revenue = live.reduce((sum, r) => sum + r.revenue, 0);
+  const costs = live.reduce((sum, r) => sum + r.costs, 0);
+  const tax = live.reduce((sum, r) => sum + r.tax, 0);
+  const profit = live.reduce((sum, r) => sum + r.profit, 0);
+  return {
+    revenue,
+    costs,
+    tax,
+    profit,
+    marginPct: revenue > 0 ? (profit / revenue) * 100 : null,
+    months: live.length,
+    bestMonth: live.length ? live.reduce((a, b) => (b.profit > a.profit ? b : a)) : null,
+    worstMonth: live.length ? live.reduce((a, b) => (b.profit < a.profit ? b : a)) : null,
+  };
+}

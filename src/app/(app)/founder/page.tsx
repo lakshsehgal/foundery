@@ -1,0 +1,345 @@
+import type { Metadata } from "next";
+import { AlertTriangle, ShieldCheck, TriangleAlert } from "lucide-react";
+import { requireFounder } from "@/lib/auth";
+import { clientEconomics, headline, projection, riskReport } from "@/lib/analytics";
+import { costTotals } from "@/lib/queries";
+import { defaultCurrency, fmtCompact, fmtMoney, fmtPct } from "@/lib/money";
+import { CATEGORY_LABEL, CATEGORY_TONE, HEALTH } from "@/lib/taxonomy";
+import {
+  BarRow, Card, CardTitle, Chip, PageBody, PageHeader, ProfitBars, StatTile,
+  TableWrap, Td, Th,
+} from "@/components/ui/primitives";
+
+export const metadata: Metadata = { title: "Founder dashboard" };
+export const dynamic = "force-dynamic";
+
+const SEVERITY_TONE: Record<string, string> = {
+  good: "var(--color-good)",
+  warning: "var(--color-warning)",
+  serious: "var(--color-serious)",
+  critical: "var(--color-critical)",
+};
+
+const BAND_COPY = {
+  steady: {
+    label: "Steady",
+    tone: "var(--color-good)",
+    line: "Nothing here would end the business this quarter.",
+    icon: ShieldCheck,
+  },
+  watch: {
+    label: "Watch",
+    tone: "var(--color-warning)",
+    line: "One or two things would hurt if they went wrong at the same time.",
+    icon: TriangleAlert,
+  },
+  exposed: {
+    label: "Exposed",
+    tone: "var(--color-critical)",
+    line: "There is a real chance of a bad quarter. Work the red items first.",
+    icon: AlertTriangle,
+  },
+} as const;
+
+export default async function FounderPage() {
+  await requireFounder();
+
+  const currency = defaultCurrency();
+  const head = headline();
+  const economics = clientEconomics();
+  const forecast = projection(6);
+  const risk = riskReport();
+  const totals = costTotals();
+  const burn = totals.reduce((sum, row) => sum + row.total, 0);
+  const band = BAND_COPY[risk.band];
+  const BandIcon = band.icon;
+
+  return (
+    <>
+      <PageHeader title="Founder dashboard" subtitle="Margins, what's coming, and what could go wrong" />
+      <PageBody width={1120}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile
+            label="Monthly revenue"
+            value={fmtCompact(head.mrr, currency)}
+            hint={`${head.activeClients} active · ${head.vipClients} VIP`}
+          />
+          <StatTile
+            label="Monthly cost base"
+            value={fmtCompact(head.burn, currency)}
+            hint="Salaries, tools, contractors, everything"
+          />
+          <StatTile
+            label="Net profit / month"
+            value={fmtCompact(head.netProfit, currency)}
+            accent={head.netProfit < 0 ? "var(--color-critical)" : "var(--color-good)"}
+            hint={head.netMarginPct === null ? "No revenue to divide by" : `${fmtPct(head.netMarginPct, 0)} margin`}
+          />
+          <StatTile
+            label="Runway"
+            value={head.runwayMonths === null ? "—" : head.runwayMonths.toFixed(1)}
+            unit={head.runwayMonths === null ? undefined : "months"}
+            hint={
+              head.runwayMonths === null
+                ? "Add a cash buffer in settings"
+                : `On ${fmtCompact(head.cashBuffer ?? 0, currency)} in the bank, no new revenue`
+            }
+          />
+        </div>
+
+        {/* --------------------------------------------------------- risk */}
+        <Card>
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="min-w-0 flex-1">
+              <CardTitle
+                title="Risk"
+                hint="The five ways a small agency actually gets hurt, scored against your own numbers."
+              />
+            </div>
+            <div
+              className="flex shrink-0 items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2"
+              style={{ background: `color-mix(in srgb, ${band.tone} 12%, transparent)` }}
+            >
+              <BandIcon size={16} style={{ color: band.tone }} />
+              <div>
+                <p className="text-[13px] font-semibold" style={{ color: band.tone }}>
+                  {band.label}
+                </p>
+                <p className="text-[11px] text-[var(--color-ink-3)]">{risk.score}/100</p>
+              </div>
+            </div>
+          </div>
+
+          <p className="mb-4 text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">{band.line}</p>
+
+          <ul className="space-y-2.5">
+            {risk.findings.map((finding) => (
+              <li
+                key={finding.key}
+                className="flex flex-wrap items-start gap-3 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2.5"
+              >
+                <span
+                  aria-hidden
+                  className="mt-[6px] h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: SEVERITY_TONE[finding.severity] }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">{finding.title}</p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-[var(--color-ink-3)]">
+                    {finding.detail}
+                  </p>
+                  {finding.severity !== "good" && (
+                    <p className="mt-1.5 text-[11.5px] font-medium text-[var(--color-ink-2)]">
+                      → {finding.action}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className="tabular shrink-0 text-[13px] font-semibold"
+                  style={{ color: SEVERITY_TONE[finding.severity] }}
+                >
+                  {finding.metric}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        {/* ---------------------------------------------------- projection */}
+        <Card>
+          <CardTitle
+            title="Next six months, on today's contracts"
+            hint="No growth assumed and no renewals invented — a retainer stops on its end date. The cliff shows up before it arrives."
+          />
+          <ProfitBars
+            points={forecast.map((month) => ({
+              label: month.label.split(" ")[0],
+              value: month.profit,
+              hint: `${month.label}: ${fmtMoney(month.revenue, currency)} in, ${fmtMoney(
+                month.costs,
+                currency,
+              )} out`,
+            }))}
+          />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left">
+              <thead>
+                <tr>
+                  <Th>Month</Th>
+                  <Th align="right">Revenue</Th>
+                  <Th align="right">Costs</Th>
+                  <Th align="right">Profit</Th>
+                  <Th align="right">Confidence</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecast.map((month) => (
+                  <tr key={month.month}>
+                    <Td>{month.label}</Td>
+                    <Td align="right">
+                      <span className="tabular">{fmtMoney(month.revenue, currency)}</span>
+                    </Td>
+                    <Td align="right">
+                      <span className="tabular text-[var(--color-ink-2)]">
+                        {fmtMoney(month.costs, currency)}
+                      </span>
+                    </Td>
+                    <Td align="right">
+                      <span
+                        className="tabular font-medium"
+                        style={{
+                          color: month.profit < 0 ? "var(--color-critical)" : "var(--color-good)",
+                        }}
+                      >
+                        {fmtMoney(month.profit, currency)}
+                      </span>
+                    </Td>
+                    <Td align="right">
+                      <Chip
+                        tone={
+                          month.confidence === "booked"
+                            ? "var(--color-good)"
+                            : month.confidence === "likely"
+                              ? "var(--color-series-1)"
+                              : "var(--color-ink-3)"
+                        }
+                      >
+                        {month.confidence}
+                      </Chip>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* ------------------------------------------------------ margins */}
+        <Card padded={false}>
+          <div className="p-4 pb-0">
+            <CardTitle
+              title="Margin by client"
+              hint="Monthly revenue against what it costs to deliver. A project is spread across the months it runs so it sits fairly next to a retainer."
+            />
+          </div>
+          <TableWrap>
+            <thead>
+              <tr>
+                <Th>Client</Th>
+                <Th align="right">Revenue / month</Th>
+                <Th align="right">Cost to serve</Th>
+                <Th align="right">Gross profit</Th>
+                <Th align="right">Margin</Th>
+                <Th align="right">Share of revenue</Th>
+                <Th>Health</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {economics.map((client) => (
+                <tr key={client.id} className="transition-colors hover:bg-[var(--color-surface-2)]">
+                  <Td>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 truncate font-medium">{client.name}</span>
+                      {client.vip && (
+                        <span
+                          title="VIP account"
+                          className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[10.5px] font-semibold"
+                          style={{ background: "var(--color-brand)", color: "var(--color-brand-ink)" }}
+                        >
+                          VIP
+                        </span>
+                      )}
+                    </div>
+                  </Td>
+                  <Td align="right">
+                    <span className="tabular">{fmtMoney(client.mrr, currency)}</span>
+                  </Td>
+                  <Td align="right">
+                    <span className="tabular text-[var(--color-ink-2)]">
+                      {fmtMoney(client.deliveryCost, currency)}
+                    </span>
+                  </Td>
+                  <Td align="right">
+                    <span className="tabular">{fmtMoney(client.grossProfit, currency)}</span>
+                  </Td>
+                  <Td align="right">
+                    {client.marginPct === null ? (
+                      <span className="text-[var(--color-ink-3)]">—</span>
+                    ) : (
+                      <span
+                        className="tabular font-medium"
+                        style={{
+                          color:
+                            client.marginPct < 20
+                              ? "var(--color-critical)"
+                              : client.marginPct < 40
+                                ? "var(--color-warning)"
+                                : "var(--color-good)",
+                        }}
+                      >
+                        {fmtPct(client.marginPct, 0)}
+                      </span>
+                    )}
+                  </Td>
+                  <Td align="right">
+                    <span className="tabular text-[var(--color-ink-2)]">
+                      {fmtPct(client.shareOfRevenuePct, 0)}
+                    </span>
+                  </Td>
+                  <Td>
+                    <Chip tone={HEALTH[client.health].tone} title={HEALTH[client.health].hint}>
+                      {HEALTH[client.health].label}
+                    </Chip>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </TableWrap>
+        </Card>
+
+        {/* ------------------------------------------------------ cost mix */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardTitle title="Cost mix" hint="What the monthly base is actually made of." />
+            {totals
+              .filter((row) => row.total > 0)
+              .sort((a, b) => b.total - a.total)
+              .map((row) => (
+                <BarRow
+                  key={row.category}
+                  label={CATEGORY_LABEL[row.category]}
+                  value={row.total}
+                  total={burn}
+                  tone={CATEGORY_TONE[row.category]}
+                  right={fmtMoney(row.total, currency)}
+                />
+              ))}
+          </Card>
+
+          <Card>
+            <CardTitle
+              title="Revenue concentration"
+              hint="How much of the month walks out the door with one phone call."
+            />
+            {economics.map((client) => (
+              <BarRow
+                key={client.id}
+                label={client.name}
+                value={client.mrr}
+                total={economics.reduce((sum, c) => sum + c.mrr, 0)}
+                tone={
+                  client.shareOfRevenuePct >= 35
+                    ? "var(--color-critical)"
+                    : client.shareOfRevenuePct >= 25
+                      ? "var(--color-warning)"
+                      : "var(--color-series-1)"
+                }
+                right={fmtMoney(client.mrr, currency)}
+              />
+            ))}
+          </Card>
+        </div>
+      </PageBody>
+    </>
+  );
+}

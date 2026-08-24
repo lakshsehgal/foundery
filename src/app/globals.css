@@ -1,0 +1,229 @@
+@import "tailwindcss";
+
+/* The display face. Headline moments only — a sign-in hero, a big empty
+   state — never UI labels, where an italic serif wrecks scanning. */
+@font-face {
+  font-family: "PP Editorial New";
+  src: url("/fonts/PPEditorialNew-Italic.otf") format("opentype");
+  font-weight: 200 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ---------------------------------------------------------------------------
+   Design tokens.
+
+   Light is the default: this is a tool people scan all day beside a browser
+   full of white tabs. Dark is a deliberate second set of steps, not an
+   inverted filter — note that the accent flips, because the brand yellow can
+   carry interaction on dark and cannot on white.
+--------------------------------------------------------------------------- */
+@theme {
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "PP Editorial New", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --color-canvas: #f6f7fb;      /* the page behind everything */
+  --color-surface: #ffffff;      /* cards, headers, inputs */
+  --color-surface-2: #f7f8fa;    /* hover, insets, quiet blocks */
+  --color-surface-3: #eceef3;    /* pressed, selected, skeletons */
+  --color-line: #e4e7ee;         /* every ordinary border */
+  --color-line-strong: #cfd4de;  /* input borders, things you can grab */
+
+  --color-ink: #14181f;          /* primary text */
+  --color-ink-2: #4d5563;        /* secondary text, labels */
+  --color-ink-3: #8892a2;        /* hints, metadata, placeholders */
+
+  /* Brand. Yellow is a SURFACE, never a text colour on white. */
+  --color-brand: #fcef24;
+  --color-brand-hover: #f2e400;
+  --color-brand-ink: #111111;
+
+  /* Interactive ink stays near-black — the only thing that reads cleanly as
+     a link on a light ground. */
+  --color-accent: #111111;
+  --color-accent-hover: #000000;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: #fdf9c9;  /* focus ring */
+
+  /* Status — fixed roles, never reused as a series colour. */
+  --color-good: #2f9e44;
+  --color-warning: #f0a202;
+  --color-serious: #e8590c;
+  --color-critical: #d03b3b;
+
+  /* Categorical chart slots. CVD-validated order; assign by fixed slot,
+     never cycle, so a category keeps one colour everywhere. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+  --color-series-5: #e87ba4;
+  --color-series-6: #008300;
+
+  --color-grid: #e1e0d9;
+  --color-axis: #c3c2b7;
+
+  --radius-xs: 4px;   /* chips, swatches */
+  --radius-sm: 6px;   /* small controls */
+  --radius-md: 8px;   /* buttons, inputs */
+  --radius-lg: 12px;  /* cards, dialogs */
+  --radius-xl: 18px;
+
+  --shadow-pop: 0 1px 3px rgb(16 24 40 / 0.1), 0 12px 32px -8px rgb(16 24 40 / 0.18);
+  --shadow-drag: 0 18px 40px -12px rgb(16 24 40 / 0.28);
+
+  --ease-out-quick: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-theme="dark"] {
+  --color-canvas: #0b0c0e;
+  --color-surface: #131519;
+  --color-surface-2: #191c21;
+  --color-surface-3: #21252c;
+  --color-line: #262b33;
+  --color-line-strong: #333a45;
+
+  --color-ink: #f2f4f7;
+  --color-ink-2: #a5adba;
+  --color-ink-3: #6f7885;
+
+  --color-brand: #fcef24;
+  --color-brand-hover: #ffff5a;
+  --color-brand-ink: #111111;
+
+  /* On dark the brand yellow can carry interaction directly. */
+  --color-accent: #fcef24;
+  --color-accent-hover: #ffff5a;
+  --color-accent-ink: #111111;
+  --color-accent-soft: #2b2708;
+
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #008300;
+
+  --color-grid: #2c2c2a;
+  --color-axis: #383835;
+
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -8px rgb(0 0 0 / 0.55);
+  --shadow-drag: 0 18px 40px -12px rgb(0 0 0 / 0.7);
+}
+
+/* ------------------------------------------------------------------ base */
+
+* { border-color: var(--color-line); }
+
+html {
+  color-scheme: light;
+  background: var(--color-canvas);
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+  /* DM Sans sets wide by default; pulling it in keeps dense views dense. */
+  letter-spacing: -0.006em;
+}
+
+h1, h2, h3 { letter-spacing: -0.02em; }
+
+/* Numbers line up in every table and clock without opting in each time. */
+.tabular, table, input[type="number"] { font-variant-numeric: tabular-nums; }
+
+/* Scrollbars that don't shove the layout around mid-drag. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-3);
+  background-clip: content-box;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* -------------------------------------------------------------- utilities */
+
+@utility tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes ui-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@utility skeleton {
+  background: var(--color-surface-3);
+  border-radius: var(--radius-sm);
+  animation: ui-pulse 1.4s var(--ease-out-quick) infinite;
+}
+
+@keyframes ui-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@utility rise { animation: ui-rise 0.18s var(--ease-out-quick) both; }
+
+@keyframes ui-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}
+/* A live/running indicator. Use sparingly — one per screen at most. */
+@utility breathe { animation: ui-breathe 2.2s ease-in-out infinite; }
+
+@utility display {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: -0.015em;
+}
+
+/* Swap light/dark logo lockups without a client-side theme check. */
+:root[data-theme="dark"] .dark-hidden { display: none; }
+:root[data-theme="dark"] .dark-shown  { display: block; }
+
+/* The Neuroid lockup is a yellow mark plus a black wordmark — right on white,
+   unreadable on black. brightness(0) flattens the whole thing to black so the
+   invert can only produce white; inverting on its own would turn the brand
+   yellow blue. Replace with a real light-on-dark lockup when one exists. */
+:root[data-theme="dark"] .logo-adaptive { filter: brightness(0) invert(1); }
+
+/* ------------------------------------------------------------------ print */
+
+@media print {
+  html, body { height: auto; background: #fff; }
+  .h-dvh, .overflow-hidden, .overflow-y-auto, .min-h-0 {
+    height: auto !important; max-height: none !important; overflow: visible !important;
+  }
+  nav { display: none !important; }
+  /* Chrome drops backgrounds to save ink — this keeps brand colour on paper. */
+  .sheet, .sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
