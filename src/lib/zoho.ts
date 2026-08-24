@@ -75,7 +75,7 @@ export async function connectWithGrantCode(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
   });
-  const json = (await response.json()) as { refresh_token?: string; error?: string };
+  const json = (await parseZohoJson(response)) as { refresh_token?: string; error?: string };
   if (!json.refresh_token) {
     return {
       ok: false,
@@ -92,6 +92,24 @@ export async function connectWithGrantCode(
   await setSetting("zoho_org_id", orgId);
   cachedToken = null;
   return { ok: true };
+}
+
+/**
+ * Zoho answers malformed or unauthorised requests with an HTML error page,
+ * not JSON — parse defensively so the surfaced error names the problem
+ * instead of dying on "Unexpected token '<'".
+ */
+async function parseZohoJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Zoho returned an unexpected response (HTTP ${response.status}) — this usually means a ` +
+        "credential is malformed. Reconnect on the Settings page with a fresh grant code, and " +
+        "remove any ZOHO_* environment variables holding placeholder values.",
+    );
+  }
 }
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
@@ -111,9 +129,13 @@ async function accessToken(config: ZohoConfig): Promise<string> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const json = (await response.json()) as { access_token?: string; expires_in?: number; error?: string };
+  const json = (await parseZohoJson(response)) as { access_token?: string; expires_in?: number; error?: string };
   if (!response.ok || !json.access_token) {
-    throw new Error(`Zoho token refresh failed: ${json.error ?? response.status}`);
+    throw new Error(
+      `Zoho rejected the stored credentials (${json.error ?? response.status}). ` +
+        "Usually this means the refresh token isn't a real token — reconnect on the Settings page " +
+        "with a fresh grant code, and remove any ZOHO_* environment variables that hold placeholder values.",
+    );
   }
 
   cachedToken = { value: json.access_token, expiresAt: Date.now() + (json.expires_in ?? 3600) * 1000 };
@@ -145,7 +167,7 @@ export async function fetchZohoInvoices(config: ZohoConfig): Promise<ZohoInvoice
     const response = await fetch(url, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
     });
-    const json = (await response.json()) as {
+    const json = (await parseZohoJson(response)) as {
       invoices?: ZohoInvoice[];
       page_context?: { has_more_page?: boolean };
       message?: string;

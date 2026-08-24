@@ -17,7 +17,15 @@ export async function GET(request: Request) {
   const config = await getZohoConfig();
   if (!config) return NextResponse.json({ skipped: "zoho not configured" });
 
-  const invoices = await fetchZohoInvoices(config);
+  let invoices;
+  try {
+    invoices = await fetchZohoInvoices(config);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "zoho fetch failed" },
+      { status: 502 },
+    );
+  }
   const db = await getDb();
   const clients = await db.query<{ id: number; name: string; zoho_name: string | null }>(
     `SELECT id, name, zoho_name FROM foundery.clients`,
