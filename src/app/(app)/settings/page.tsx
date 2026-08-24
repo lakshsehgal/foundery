@@ -5,6 +5,8 @@ import { OPERATOR_SWITCHES, readOperatorSwitches } from "@/lib/policy";
 import { defaultCurrency, symbolFor } from "@/lib/money";
 import { Card, CardTitle, PageBody, PageHeader, TableWrap, Td, Th } from "@/components/ui/primitives";
 import { BusinessForm, VisibilityForm } from "./settings-forms";
+import { ZohoConnectCard } from "./zoho-connect";
+import { getZohoConfig } from "@/lib/zoho";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -15,7 +17,7 @@ export default async function SettingsPage() {
   const currency = defaultCurrency();
   const db = await getDb();
 
-  const [storedSwitches, audit, businessName, cashBuffer] = await Promise.all([
+  const [storedSwitches, audit, businessName, cashBuffer, zohoConfig] = await Promise.all([
     readOperatorSwitches(),
     db.query<{
       ts: string; actor: string; action: string; entity: string | null; detail: string | null;
@@ -25,6 +27,7 @@ export default async function SettingsPage() {
     ),
     getSetting("business_name", "Neuroid Media"),
     getSetting("cash_buffer", ""),
+    getZohoConfig(),
   ]);
 
   const stored = new Map(storedSwitches.map((row) => [row.key, row.value]));
@@ -46,6 +49,8 @@ export default async function SettingsPage() {
           cashBuffer={cashBuffer}
           currencySymbol={symbolFor(currency)}
         />
+
+        <ZohoConnectCard connected={zohoConfig !== null} />
 
         <Card padded={false}>
           <div className="p-4 pb-0">

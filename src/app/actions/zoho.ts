@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireFounder } from "@/lib/auth";
 import { getDb, logAudit } from "@/lib/db";
-import { fetchZohoInvoices, mapZohoStatus, zohoConfigured, type ZohoInvoice } from "@/lib/zoho";
+import {
+  connectWithGrantCode, fetchZohoInvoices, getZohoConfig, mapZohoStatus, type ZohoInvoice,
+} from "@/lib/zoho";
 import { todayISO } from "@/lib/dates";
 import type { ActionState } from "./clients";
 
@@ -26,16 +28,17 @@ export async function syncZohoInvoices(): Promise<{
 }> {
   await requireFounder();
 
-  if (!zohoConfigured()) {
+  const config = await getZohoConfig();
+  if (!config) {
     return {
       error:
-        "Zoho isn't connected yet. Add ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN and ZOHO_ORG_ID in Vercel — the README's “Zoho Books sync” section walks through getting them.",
+        "Zoho isn't connected yet — connect it on the Settings page (Client ID, Secret and a fresh grant code).",
     };
   }
 
   let invoices: ZohoInvoice[];
   try {
-    invoices = await fetchZohoInvoices();
+    invoices = await fetchZohoInvoices(config);
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Zoho fetch failed." };
   }
@@ -129,4 +132,29 @@ export async function syncZohoInvoices(): Promise<{
 export async function syncZohoAction(_prev: ActionState, _form: FormData): Promise<ActionState> {
   const result = await syncZohoInvoices();
   return result.error ? { error: result.error } : { ok: result.ok };
+}
+
+/**
+ * The Settings-page connect flow: exchanges the founder's Self Client grant
+ * code for the permanent refresh token, stores the configuration, and proves
+ * it works by immediately running the first sync.
+ */
+export async function connectZohoAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  await requireFounder();
+
+  const clientId = String(form.get("client_id") ?? "").trim();
+  const clientSecret = String(form.get("client_secret") ?? "").trim();
+  const grantCode = String(form.get("grant_code") ?? "").trim();
+  const orgId = String(form.get("org_id") ?? "").trim();
+  if (!clientId || !clientSecret || !grantCode || !orgId) {
+    return { error: "All four fields are needed — ID, secret, grant code and organisation ID." };
+  }
+
+  const result = await connectWithGrantCode(clientId, clientSecret, grantCode, orgId);
+  if (!result.ok) return { error: result.error };
+  await logAudit("founder", "zoho_connected", "settings");
+
+  const sync = await syncZohoInvoices();
+  if (sync.error) return { error: `Connected, but the first sync failed: ${sync.error}` };
+  return { ok: `Connected. ${sync.ok}` };
 }

@@ -12,27 +12,98 @@ import "server-only";
  * chasing feed and the P&L. Nothing here writes back to Zoho.
  */
 
+import { getSettings, setSetting } from "./db";
+
 const DC = () => process.env.ZOHO_DC || "in"; // Indian data centre by default
 
-export function zohoConfigured(): boolean {
-  return Boolean(
-    process.env.ZOHO_CLIENT_ID &&
-      process.env.ZOHO_CLIENT_SECRET &&
-      process.env.ZOHO_REFRESH_TOKEN &&
-      process.env.ZOHO_ORG_ID,
-  );
+export type ZohoConfig = {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  orgId: string;
+};
+
+/**
+ * Credentials come from the environment when set, else from the settings
+ * table — the settings path exists so the founder can connect Zoho from the
+ * Settings page without touching Vercel. The settings table is founder-only
+ * territory already (schema isolation + RLS + the app's own role gate), and
+ * the stored token is read-scoped: it can list invoices, nothing else.
+ */
+export async function getZohoConfig(): Promise<ZohoConfig | null> {
+  const env = {
+    clientId: process.env.ZOHO_CLIENT_ID,
+    clientSecret: process.env.ZOHO_CLIENT_SECRET,
+    refreshToken: process.env.ZOHO_REFRESH_TOKEN,
+    orgId: process.env.ZOHO_ORG_ID,
+  };
+  if (env.clientId && env.clientSecret && env.refreshToken && env.orgId) {
+    return env as ZohoConfig;
+  }
+
+  const settings = await getSettings();
+  const stored = {
+    clientId: settings.get("zoho_client_id"),
+    clientSecret: settings.get("zoho_client_secret"),
+    refreshToken: settings.get("zoho_refresh_token"),
+    orgId: settings.get("zoho_org_id"),
+  };
+  if (stored.clientId && stored.clientSecret && stored.refreshToken && stored.orgId) {
+    return stored as ZohoConfig;
+  }
+  return null;
+}
+
+/**
+ * One-time: turn a Self Client grant code (valid ~10 minutes) into the
+ * permanent refresh token, and store the whole configuration.
+ */
+export async function connectWithGrantCode(
+  clientId: string,
+  clientSecret: string,
+  grantCode: string,
+  orgId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const params = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: clientId,
+    client_secret: clientSecret,
+    code: grantCode,
+  });
+  const response = await fetch(`https://accounts.zoho.${DC()}/oauth/v2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+  const json = (await response.json()) as { refresh_token?: string; error?: string };
+  if (!json.refresh_token) {
+    return {
+      ok: false,
+      error:
+        json.error === "invalid_code"
+          ? "Zoho rejected the grant code — they expire in 10 minutes, so generate a fresh one and try again."
+          : `Zoho said: ${json.error ?? "no refresh token returned"}.`,
+    };
+  }
+
+  await setSetting("zoho_client_id", clientId);
+  await setSetting("zoho_client_secret", clientSecret);
+  await setSetting("zoho_refresh_token", json.refresh_token);
+  await setSetting("zoho_org_id", orgId);
+  cachedToken = null;
+  return { ok: true };
 }
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-async function accessToken(): Promise<string> {
+async function accessToken(config: ZohoConfig): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    client_id: process.env.ZOHO_CLIENT_ID!,
-    client_secret: process.env.ZOHO_CLIENT_SECRET!,
-    refresh_token: process.env.ZOHO_REFRESH_TOKEN!,
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: config.refreshToken,
   });
 
   const response = await fetch(`https://accounts.zoho.${DC()}/oauth/v2/token`, {
@@ -61,13 +132,13 @@ export type ZohoInvoice = {
 };
 
 /** Every invoice in the organisation, paginated out. */
-export async function fetchZohoInvoices(): Promise<ZohoInvoice[]> {
-  const token = await accessToken();
+export async function fetchZohoInvoices(config: ZohoConfig): Promise<ZohoInvoice[]> {
+  const token = await accessToken(config);
   const out: ZohoInvoice[] = [];
 
   for (let page = 1; page <= 40; page++) {
     const url = new URL(`https://www.zohoapis.${DC()}/books/v3/invoices`);
-    url.searchParams.set("organization_id", process.env.ZOHO_ORG_ID!);
+    url.searchParams.set("organization_id", config.orgId);
     url.searchParams.set("page", String(page));
     url.searchParams.set("per_page", "200");
 

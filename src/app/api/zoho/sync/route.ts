@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb, logAudit } from "@/lib/db";
-import { fetchZohoInvoices, mapZohoStatus, zohoConfigured } from "@/lib/zoho";
+import { fetchZohoInvoices, getZohoConfig, mapZohoStatus } from "@/lib/zoho";
 import { todayISO } from "@/lib/dates";
 
 /**
@@ -14,9 +14,10 @@ export async function GET(request: Request) {
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
-  if (!zohoConfigured()) return NextResponse.json({ skipped: "zoho not configured" });
+  const config = await getZohoConfig();
+  if (!config) return NextResponse.json({ skipped: "zoho not configured" });
 
-  const invoices = await fetchZohoInvoices();
+  const invoices = await fetchZohoInvoices(config);
   const db = await getDb();
   const clients = await db.query<{ id: number; name: string; zoho_name: string | null }>(
     `SELECT id, name, zoho_name FROM foundery.clients`,
