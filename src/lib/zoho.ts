@@ -75,7 +75,10 @@ export async function connectWithGrantCode(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
   });
-  const json = (await parseZohoJson(response)) as { refresh_token?: string; error?: string };
+  const json = (await parseZohoJson(response, "grant-code exchange")) as {
+    refresh_token?: string;
+    error?: string;
+  };
   if (!json.refresh_token) {
     return {
       ok: false,
@@ -99,15 +102,21 @@ export async function connectWithGrantCode(
  * not JSON — parse defensively so the surfaced error names the problem
  * instead of dying on "Unexpected token '<'".
  */
-async function parseZohoJson(response: Response): Promise<unknown> {
+async function parseZohoJson(response: Response, context: string): Promise<unknown> {
   const text = await response.text();
   try {
     return JSON.parse(text);
   } catch {
+    // The HTML page usually names the actual problem — log it whole for the
+    // server logs and put a readable slice in the surfaced error.
+    console.error(`zoho ${context} returned non-JSON (HTTP ${response.status}):`, text.slice(0, 2000));
+    const snippet = text
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
     throw new Error(
-      `Zoho returned an unexpected response (HTTP ${response.status}) — this usually means a ` +
-        "credential is malformed. Reconnect on the Settings page with a fresh grant code, and " +
-        "remove any ZOHO_* environment variables holding placeholder values.",
+      `Zoho ${context} returned HTTP ${response.status}${snippet ? ` — "${snippet}"` : ""}.`,
     );
   }
 }
@@ -129,7 +138,11 @@ async function accessToken(config: ZohoConfig): Promise<string> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const json = (await parseZohoJson(response)) as { access_token?: string; expires_in?: number; error?: string };
+  const json = (await parseZohoJson(response, "token refresh")) as {
+    access_token?: string;
+    expires_in?: number;
+    error?: string;
+  };
   if (!response.ok || !json.access_token) {
     throw new Error(
       `Zoho rejected the stored credentials (${json.error ?? response.status}). ` +
@@ -167,7 +180,7 @@ export async function fetchZohoInvoices(config: ZohoConfig): Promise<ZohoInvoice
     const response = await fetch(url, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
     });
-    const json = (await parseZohoJson(response)) as {
+    const json = (await parseZohoJson(response, "invoice fetch")) as {
       invoices?: ZohoInvoice[];
       page_context?: { has_more_page?: boolean };
       message?: string;
