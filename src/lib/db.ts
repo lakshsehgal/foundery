@@ -77,14 +77,16 @@ async function openPostgres(url: string): Promise<Db> {
     types.setTypeParser(Number(oid), parser as (value: string) => string);
   }
 
+  const { cleanUrl, ssl } = resolveSsl(url);
+
   const pool = new Pool({
-    connectionString: url,
+    connectionString: cleanUrl,
     // Serverless: many short-lived instances, each wanting very few
     // connections. Supabase's transaction pooler multiplexes the rest.
     max: Number(process.env.FOUNDERY_DB_POOL_MAX || 3),
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
-    ssl: sslOptions(url),
+    ssl,
   });
 
   return {
@@ -98,18 +100,47 @@ async function openPostgres(url: string): Promise<Db> {
   };
 }
 
+export type SslConfig = false | { ca?: string; rejectUnauthorized: boolean };
+
 /**
- * Supabase terminates TLS with its own CA. Paste that certificate into
- * FOUNDERY_DB_CA_CERT and the chain is verified properly. Without it the
- * connection is still encrypted but the certificate isn't checked — which is
- * what `sslmode=require` means and what Supabase's own quickstarts use. Set
- * the certificate for anything you care about.
+ * Decides TLS in exactly one place, and strips every ssl parameter out of the
+ * connection string so the driver can't decide differently.
+ *
+ * The trap this avoids: Supabase's injected POSTGRES_URL carries
+ * `sslmode=require`, and pg ≥8.16 quietly upgraded that to full certificate
+ * verification — against a chain signed by Supabase's own CA, which Node
+ * cannot verify. The result is SELF_SIGNED_CERT_IN_CHAIN on every query, with
+ * our explicit `ssl` option losing the argument to the query string. So the
+ * query string doesn't get a vote:
+ *
+ *   FOUNDERY_DB_CA_CERT set → verify the chain against it (the good setup;
+ *                             the cert lives in Supabase → Settings →
+ *                             Database → SSL configuration)
+ *   otherwise               → encrypt but don't verify, which is what
+ *                             `sslmode=require` has always meant in practice
+ *                             and what Supabase's own quickstarts do
+ *   sslmode=disable in url  → no TLS (local/test servers only)
  */
-function sslOptions(url: string): false | { ca?: string; rejectUnauthorized: boolean } {
-  if (url.includes("sslmode=disable")) return false;
+export function resolveSsl(url: string): { cleanUrl: string; ssl: SslConfig } {
+  let cleanUrl = url;
+  let disabled = /[?&]sslmode=disable\b/.test(url);
+
+  try {
+    const parsed = new URL(url);
+    disabled = parsed.searchParams.get("sslmode") === "disable";
+    for (const param of ["sslmode", "sslcert", "sslkey", "sslrootcert", "uselibpqcompat", "ssl"]) {
+      parsed.searchParams.delete(param);
+    }
+    cleanUrl = parsed.toString();
+  } catch {
+    // Not URL-parseable (odd but legal for libpq strings): leave it alone and
+    // let the explicit ssl option do its best.
+  }
+
+  if (disabled) return { cleanUrl, ssl: false };
   const ca = process.env.FOUNDERY_DB_CA_CERT;
-  if (ca) return { ca, rejectUnauthorized: true };
-  return { rejectUnauthorized: false };
+  if (ca) return { cleanUrl, ssl: { ca, rejectUnauthorized: true } };
+  return { cleanUrl, ssl: { rejectUnauthorized: false } };
 }
 
 async function openPglite(): Promise<Db> {

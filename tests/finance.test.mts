@@ -215,3 +215,34 @@ describe("client economics", () => {
     assert.ok(Math.abs(total - 100) < 0.001);
   });
 });
+
+describe("database TLS", () => {
+  test("ssl params in the connection string are stripped and decided by us", async () => {
+    const { resolveSsl } = await import("../src/lib/db");
+
+    // Supabase's injected URL shape: sslmode=require plus extras.
+    const supabase = resolveSsl(
+      "postgres://postgres.ref:pw@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x",
+    );
+    assert.ok(!supabase.cleanUrl.includes("sslmode"), "sslmode must not reach the driver");
+    assert.ok(supabase.cleanUrl.includes("supa=base-pooler.x"), "unrelated params survive");
+    assert.deepEqual(supabase.ssl, { rejectUnauthorized: false });
+
+    // A CA cert upgrades to full verification.
+    process.env.FOUNDERY_DB_CA_CERT = "-----BEGIN CERTIFICATE-----fake";
+    const verified = resolveSsl("postgres://u:p@host:6543/db?sslmode=require");
+    assert.deepEqual(verified.ssl, {
+      ca: "-----BEGIN CERTIFICATE-----fake",
+      rejectUnauthorized: true,
+    });
+    delete process.env.FOUNDERY_DB_CA_CERT;
+
+    // An explicit disable is honoured.
+    assert.equal(resolveSsl("postgres://u:p@localhost:5432/db?sslmode=disable").ssl, false);
+
+    // No params at all: unchanged URL, encrypted-not-verified.
+    const bare = resolveSsl("postgres://u:p@host:6543/db");
+    assert.equal(bare.cleanUrl, "postgres://u:p@host:6543/db");
+    assert.deepEqual(bare.ssl, { rejectUnauthorized: false });
+  });
+});
