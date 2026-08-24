@@ -206,3 +206,28 @@ export function mapZohoStatus(status: string, balance: number, total: number): s
       return balance < total ? "part_paid" : "sent";
   }
 }
+
+export type ZohoCustomer = {
+  name: string;
+  invoiceCount: number;
+  outstanding: number;
+};
+
+/**
+ * The customer book, derived from the invoices themselves — the token is
+ * scoped to invoices only, and every invoice carries its customer's name, so
+ * no extra scope is needed to know who the customers are.
+ */
+export function customersFromInvoices(invoices: ZohoInvoice[]): ZohoCustomer[] {
+  const map = new Map<string, ZohoCustomer>();
+  for (const invoice of invoices) {
+    const key = invoice.customer_name.trim();
+    const entry = map.get(key) ?? { name: key, invoiceCount: 0, outstanding: 0 };
+    entry.invoiceCount += 1;
+    entry.outstanding += invoice.balance;
+    map.set(key, entry);
+  }
+  return [...map.values()].sort(
+    (a, b) => b.outstanding - a.outstanding || a.name.localeCompare(b.name),
+  );
+}

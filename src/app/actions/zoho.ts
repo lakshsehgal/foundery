@@ -158,3 +158,36 @@ export async function connectZohoAction(_prev: ActionState, form: FormData): Pro
   if (sync.error) return { error: `Connected, but the first sync failed: ${sync.error}` };
   return { ok: `Connected. ${sync.ok}` };
 }
+
+/**
+ * One row of the matcher: point a Zoho customer at a client (writes the
+ * client's zoho_name), or clear the mapping by leaving the client empty.
+ * A Zoho name maps to at most one client, so any previous holder is cleared.
+ */
+export async function mapZohoCustomerAction(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  await requireFounder();
+
+  const zohoName = String(form.get("zoho_name") ?? "").trim();
+  if (!zohoName) return { error: "No Zoho customer given." };
+  const clientId = Number(form.get("client_id") ?? 0) || null;
+
+  const db = await getDb();
+  await db.query(
+    `UPDATE foundery.clients SET zoho_name = NULL, updated_at = now()
+     WHERE lower(zoho_name) = lower($1)`,
+    [zohoName],
+  );
+  if (clientId) {
+    await db.query(
+      `UPDATE foundery.clients SET zoho_name = $1, updated_at = now() WHERE id = $2`,
+      [zohoName, clientId],
+    );
+  }
+  await logAudit("founder", clientId ? "zoho_customer_mapped" : "zoho_customer_unmapped", "client", clientId ?? undefined, zohoName);
+  revalidatePath("/settings");
+  revalidatePath("/clients");
+  return { ok: clientId ? `Matched — sync to pull their invoices.` : "Mapping cleared." };
+}

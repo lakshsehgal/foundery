@@ -6,10 +6,50 @@ import { defaultCurrency, symbolFor } from "@/lib/money";
 import { Card, CardTitle, PageBody, PageHeader, TableWrap, Td, Th } from "@/components/ui/primitives";
 import { BusinessForm, VisibilityForm } from "./settings-forms";
 import { ZohoConnectCard } from "./zoho-connect";
-import { getZohoConfig } from "@/lib/zoho";
+import { ZohoMatchCard, type MatchCustomer } from "./zoho-match";
+import { customersFromInvoices, fetchZohoInvoices, getZohoConfig } from "@/lib/zoho";
+import { clientOptions, listClients } from "@/lib/queries";
+import { fmtCompact } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
+
+/**
+ * Server side of the matcher: pull the invoices from Zoho (the token can't
+ * list contacts, but every invoice names its customer), aggregate them, and
+ * pair with the current client → zoho_name mappings.
+ */
+async function ZohoMatcher() {
+  const [clients, fullClients] = await Promise.all([clientOptions(), listClients("founder")]);
+  const mappingByZohoName = new Map(
+    fullClients
+      .filter((client) => client.zoho_name)
+      .map((client) => [client.zoho_name!.trim().toLowerCase(), client.id]),
+  );
+
+  let customers: MatchCustomer[] = [];
+  let fetchError: string | null = null;
+  try {
+    const config = (await getZohoConfig())!;
+    customers = customersFromInvoices(await fetchZohoInvoices(config)).map((customer) => ({
+      name: customer.name,
+      invoiceCount: customer.invoiceCount,
+      outstandingLabel: fmtCompact(customer.outstanding),
+      hasOutstanding: customer.outstanding > 0,
+      mappedClientId: mappingByZohoName.get(customer.name.trim().toLowerCase()) ?? null,
+    }));
+  } catch (error) {
+    fetchError = error instanceof Error ? error.message : "Couldn't reach Zoho.";
+  }
+
+  return (
+    <ZohoMatchCard
+      customers={customers}
+      clients={clients.map((client) => ({ id: client.id, name: client.name }))}
+      fetchError={fetchError}
+    />
+  );
+}
 
 export default async function SettingsPage() {
   await requireFounder();
@@ -51,6 +91,8 @@ export default async function SettingsPage() {
         />
 
         <ZohoConnectCard connected={zohoConfig !== null} />
+
+        {zohoConfig && <ZohoMatcher />}
 
         <Card padded={false}>
           <div className="p-4 pb-0">
