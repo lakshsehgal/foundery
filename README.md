@@ -4,6 +4,9 @@ Neuroid's founders dashboard. Clients, costs, invoices, onboarding and profit
 in one place, with a line down the middle: the operator runs the day, the
 founder sees the money.
 
+**Live:** [foundery-laksh-sehgals-projects.vercel.app](https://foundery-laksh-sehgals-projects.vercel.app)
+— Vercel (`foundery`, auto-deploys from `main`) + Supabase.
+
 <!-- Screens: Today · Clients · Costs · Invoices · Onboarding · Founder · P&L -->
 
 ## Running it locally
