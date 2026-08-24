@@ -1,10 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Crown, Plus, Search, Users } from "lucide-react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Check, Copy, Crown, Pencil, Plus, Rocket, Search, Users } from "lucide-react";
+import { startOnboarding } from "@/app/actions/onboarding";
+import type { ActionState } from "@/app/actions/clients";
 import { Button, Select, TextInput } from "@/components/ui/form";
 import { avatarTint, Chip, EmptyState, Redacted } from "@/components/ui/primitives";
-import { CLIENT_STATUS, ENGAGEMENT, HEALTH, type ClientStatus } from "@/lib/taxonomy";
+import {
+  CLIENT_STATUS, ENGAGEMENT, HEALTH, ONBOARDING_STATUS, type ClientStatus, type OnboardingStatus,
+} from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
 import { ClientEditor } from "./client-editor";
 
@@ -32,19 +37,77 @@ function marginTone(margin: number): string {
  * way monday groups rows — the book of business readable at a glance, not a
  * spreadsheet to be scanned.
  */
+function StartOnboardingButton({ clientId, clientName }: { clientId: number; clientName: string }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(startOnboarding, {});
+
+  useEffect(() => {
+    if (state.ok) toast.success(state.ok);
+    if (state.error) toast.error(state.error);
+  }, [state]);
+
+  return (
+    <form action={action} onClick={(event) => event.stopPropagation()}>
+      <input type="hidden" name="client_id" value={clientId} />
+      <button
+        type="submit"
+        disabled={pending}
+        title={`Start onboarding for ${clientName}`}
+        className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[11.5px] font-semibold text-[var(--color-ink-2)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-ink)] disabled:opacity-50"
+      >
+        <Rocket size={12} />
+        Start onboarding
+      </button>
+    </form>
+  );
+}
+
+function CopyLinkButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy(event: React.MouseEvent) {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success("Onboarding link copied — send it to the client.");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Couldn't copy automatically — the link is on the Onboarding page.");
+    }
+  }
+
+  return (
+    <button
+      onClick={copy}
+      title="Copy the client's onboarding link"
+      className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[11.5px] font-semibold text-[var(--color-ink-2)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-ink)]"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      Copy link
+    </button>
+  );
+}
+
 export function ClientsView({
-  clients, canEditValues, currencySymbol, money,
+  clients, canEditValues, currencySymbol, money, onboardings,
 }: {
   clients: ClientView[];
   canEditValues: boolean;
   currencySymbol: string;
   /** Worked out and formatted on the server. Absent = not cleared to see it. */
   money: Record<number, ClientMoney>;
+  /** Latest guided onboarding per client, if any. */
+  onboardings: Record<number, { status: string; url: string }>;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("working");
   const [editing, setEditing] = useState<ClientView | null>(null);
   const [open, setOpen] = useState(false);
+  // Bumped on every open: folded into the editor's key so each open is a
+  // fresh mount with fresh action state. Without it, reopening "add client"
+  // reused the previous mount, whose leftover "saved!" state instantly
+  // re-closed the dialog.
+  const [openedAt, setOpenedAt] = useState(0);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -64,6 +127,7 @@ export function ClientsView({
   function edit(client: ClientView | null) {
     setEditing(client);
     setOpen(true);
+    setOpenedAt((n) => n + 1);
   }
 
   const groups = GROUPS.map((group) => ({
@@ -146,11 +210,20 @@ export function ClientsView({
               {group.clients.map((client) => {
                 const clientTone = avatarTint(String(client.id));
                 const figures = money[client.id];
+                const onboarding = onboardings[client.id];
                 return (
-                  <button
+                  <div
                     key={client.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => edit(client)}
-                    className="lift group overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] text-left"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        edit(client);
+                      }
+                    }}
+                    className="lift group cursor-pointer overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] text-left"
                   >
                     {/* The client's colour, everywhere they appear. */}
                     <div aria-hidden className="h-1.5 w-full" style={{ background: clientTone }} />
@@ -160,6 +233,11 @@ export function ClientsView({
                         <span className="min-w-0 truncate text-[15px] font-bold tracking-tight">
                           {client.name}
                         </span>
+                        <Pencil
+                          size={11}
+                          aria-hidden
+                          className="shrink-0 text-[var(--color-ink-3)] opacity-0 transition-opacity group-hover:opacity-100"
+                        />
                         {client.vip && (
                           <span
                             title="VIP account"
@@ -233,8 +311,32 @@ export function ClientsView({
                           <Redacted />
                         )}
                       </div>
+
+                      {/* Onboarding strip: start it, track it, copy the link. */}
+                      <div
+                        className="mt-3 -mx-1 flex flex-wrap items-center gap-1 border-t border-[var(--color-line)] pt-2.5"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {onboarding ? (
+                          <>
+                            <Chip
+                              tone={
+                                ONBOARDING_STATUS[onboarding.status as OnboardingStatus]?.tone ??
+                                "var(--color-ink-3)"
+                              }
+                            >
+                              {ONBOARDING_STATUS[onboarding.status as OnboardingStatus]?.label ??
+                                onboarding.status}
+                            </Chip>
+                            <span className="ml-auto" />
+                            <CopyLinkButton url={onboarding.url} />
+                          </>
+                        ) : (
+                          <StartOnboardingButton clientId={client.id} clientName={client.name} />
+                        )}
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -243,7 +345,7 @@ export function ClientsView({
       )}
 
       <ClientEditor
-        key={editing?.id ?? "new"}
+        key={`${editing?.id ?? "new"}-${openedAt}`}
         open={open}
         onClose={() => setOpen(false)}
         client={editing}

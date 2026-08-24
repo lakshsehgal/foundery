@@ -75,10 +75,12 @@ export function OnboardingView({
 }) {
   const [editing, setEditing] = useState<FormView | null>(null);
   const [open, setOpen] = useState(false);
+  const [openedAt, setOpenedAt] = useState(0);
 
   function edit(form: FormView | null) {
     setEditing(form);
     setOpen(true);
+    setOpenedAt((n) => n + 1);
   }
 
   return (
@@ -171,7 +173,7 @@ export function OnboardingView({
       )}
 
       <FormEditor
-        key={editing?.id ?? "new"}
+        key={`${editing?.id ?? "new"}-${openedAt}`}
         open={open}
         onClose={() => setOpen(false)}
         form={editing}

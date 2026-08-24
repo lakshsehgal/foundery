@@ -95,15 +95,35 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CardTitle title="Passcodes and currency" hint="These live outside the app." />
+          <CardTitle title="Who can sign in" hint="Configured in the environment, not the database." />
           <p className="text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">
-            The two passcodes, the display currency and the public link base are read from the{" "}
+            Sign-in is passwordless — Google, or a code emailed to you. Who gets in is two lists of
+            emails in the deployment&apos;s environment variables:{" "}
             <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
-              .env
+              FOUNDERY_FOUNDER_EMAILS
             </code>{" "}
-            file on the machine running Foundery, not from the database — so nobody can change them
-            from inside the app, and nobody can read them back out of it. Change them there and
-            restart.
+            and{" "}
+            <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
+              FOUNDERY_OPERATOR_EMAILS
+            </code>{" "}
+            (comma-separated). An email on neither list is turned away by name. Keeping the lists
+            outside the app means nobody can grant themselves access from inside it.
+          </p>
+        </Card>
+
+        <Card>
+          <CardTitle
+            title="Our access IDs for client onboarding"
+            hint="Shown to clients inside the onboarding checklist, so they grant access to the right accounts. Leave blank to show generic instructions."
+          />
+          <p className="text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">
+            Business Manager ID, Shopify collaborator code, Google MCC ID and the Google emails to
+            invite are read from settings keys{" "}
+            <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
+              neuroid_meta_bm_id · neuroid_shopify_collab · neuroid_google_mcc · neuroid_gmc_email ·
+              neuroid_ga_email
+            </code>
+            . Ask Claude to set them, or insert them into the settings table directly.
           </p>
         </Card>
       </PageBody>

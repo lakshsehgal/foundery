@@ -170,3 +170,85 @@ export type OnboardingField = {
   required: boolean;
   hint?: string;
 };
+
+/* ------------------------------------------------------- guided onboarding */
+
+/**
+ * Step 1 of the guided flow: the details every new client gives us before
+ * anything else moves. Fixed on purpose — this is the contract-and-billing
+ * information, not a form the team improvises per client.
+ */
+export const ONBOARDING_DETAIL_FIELDS = [
+  { key: "contact_name", label: "Full name", type: "text", required: true, hint: "Who we speak to day to day." },
+  { key: "email", label: "Email", type: "email", required: true, hint: "" },
+  { key: "phone", label: "Phone number", type: "text", required: true, hint: "WhatsApp-reachable, ideally." },
+  { key: "authorized_signatory", label: "Authorised signatory", type: "text", required: true, hint: "Who signs the agreement on your side." },
+  { key: "gst_certificate", label: "GST certificate", type: "url", required: true, hint: "Upload it to Drive or Dropbox and paste the link here." },
+  { key: "shopify_domain", label: "Shopify domain", type: "text", required: true, hint: "e.g. yourbrand.myshopify.com" },
+  { key: "google_ads_id", label: "Google Ads account ID", type: "text", required: false, hint: "The 10-digit ID, like 123-456-7890. Skip if you don't run Google yet." },
+] as const satisfies readonly OnboardingField[];
+
+/**
+ * Step 2: the accesses we need before delivery can start. Each item carries
+ * the instruction the client sees; `settingKey` names a settings row that,
+ * when filled in on /settings, gets appended to the instruction (our BM id,
+ * collaborator code, and so on).
+ */
+export type AccessItem = {
+  key: string;
+  label: string;
+  hint: string;
+  settingKey?: string;
+  settingLabel?: string;
+};
+
+export const ACCESS_ITEMS: AccessItem[] = [
+  {
+    key: "meta_bm",
+    label: "Meta Business Manager — partner access",
+    hint: "Business settings → Partners → Add → Give a partner access to your assets.",
+    settingKey: "neuroid_meta_bm_id",
+    settingLabel: "Our Business Manager ID",
+  },
+  {
+    key: "meta_ad_account",
+    label: "Meta ad account",
+    hint: "Share the ad account to our Business Manager with Manage access.",
+  },
+  {
+    key: "shopify",
+    label: "Shopify — collaborator access",
+    hint: "Settings → Users and permissions → Collaborators.",
+    settingKey: "neuroid_shopify_collab",
+    settingLabel: "Our collaborator request code",
+  },
+  {
+    key: "google_ads",
+    label: "Google Ads account",
+    hint: "We'll send a link request from our manager account — accept it under Access and security.",
+    settingKey: "neuroid_google_mcc",
+    settingLabel: "Our manager (MCC) ID",
+  },
+  {
+    key: "gmc",
+    label: "Google Merchant Center",
+    hint: "Settings → People and access → add us with Standard access.",
+    settingKey: "neuroid_gmc_email",
+    settingLabel: "The email to invite",
+  },
+  {
+    key: "ga4",
+    label: "Google Analytics (GA4)",
+    hint: "Admin → Property access management → add us as Analyst or above.",
+    settingKey: "neuroid_ga_email",
+    settingLabel: "The email to invite",
+  },
+];
+
+export type OnboardingStatus = "invited" | "details_done" | "completed";
+
+export const ONBOARDING_STATUS: Record<OnboardingStatus, { label: string; tone: string }> = {
+  invited: { label: "Link sent", tone: "var(--color-series-1)" },
+  details_done: { label: "Details in — accesses pending", tone: "var(--color-warning)" },
+  completed: { label: "Onboarded", tone: "var(--color-good)" },
+};

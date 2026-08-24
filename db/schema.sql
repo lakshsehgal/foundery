@@ -82,6 +82,9 @@ create table if not exists foundery.invoices (
   updated_at  timestamptz not null default now()
 );
 create index if not exists idx_invoices_client on foundery.invoices(client_id);
+-- Ties a row to the external system it was synced from (e.g. Zoho Books), so
+-- re-syncing updates in place instead of duplicating.
+alter table foundery.invoices add column if not exists external_id text unique;
 create index if not exists idx_invoices_due    on foundery.invoices(due_date);
 
 create table if not exists foundery.onboarding_forms (
@@ -115,6 +118,22 @@ create table if not exists foundery.pnl_months (
   updated_at    timestamptz not null default now()
 );
 
+-- Guided, per-client onboarding: one personalised link per client, a fixed
+-- details form, then an access checklist. `details` and `access` are jsonb so
+-- the field list can evolve without a migration.
+create table if not exists foundery.onboardings (
+  id           bigint generated always as identity primary key,
+  client_id    bigint not null references foundery.clients(id) on delete cascade,
+  token        text not null unique,          -- the personalised URL segment
+  status       text not null default 'invited',   -- invited | details_done | completed
+  details      jsonb not null default '{}'::jsonb,
+  access       jsonb not null default '{}'::jsonb,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  completed_at timestamptz
+);
+create index if not exists idx_onboardings_client on foundery.onboardings(client_id);
+
 create table if not exists foundery.settings (
   key   text primary key,
   value text not null
@@ -139,4 +158,5 @@ alter table foundery.onboarding_forms       enable row level security;
 alter table foundery.onboarding_submissions enable row level security;
 alter table foundery.pnl_months             enable row level security;
 alter table foundery.settings               enable row level security;
+alter table foundery.onboardings            enable row level security;
 alter table foundery.audit_log              enable row level security;

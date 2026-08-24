@@ -161,6 +161,59 @@ there to be listed.
 **Runway is blank until you enter a cash balance** on Settings. A made-up
 runway is worse than no runway.
 
+## Guided client onboarding
+
+"Start onboarding" on a client's card creates a **personalised link**
+(`/welcome/…`) to send that client. They see "Hello, {their name}" and a
+two-step flow: a fixed details form (contact, authorised signatory, GST
+certificate, Shopify domain, Google Ads ID), then an access checklist (Meta
+Business Manager partner access, Meta ad account, Shopify collaborator,
+Google Ads, Merchant Center, GA4) they tick off as they grant each one, with
+partial saves. When every box is ticked the onboarding flips to **Onboarded**
+on their card, and everything they entered is readable on the Onboarding page.
+
+Set the settings keys `neuroid_meta_bm_id`, `neuroid_shopify_collab`,
+`neuroid_google_mcc`, `neuroid_gmc_email` and `neuroid_ga_email` and the
+checklist instructions include your actual IDs.
+
+## Sign-in
+
+Passwordless, two ways, both through Supabase Auth: **Continue with Google**,
+or a **6-digit code emailed** to you. Who gets in is two comma-separated
+email lists in the environment — `FOUNDERY_FOUNDER_EMAILS` and
+`FOUNDERY_OPERATOR_EMAILS` — checked *before* any code is sent; an address on
+neither list is turned away by name and never receives mail. After identity
+is verified, Foundery mints its own signed 12-hour role cookie, so the
+role/redaction layer is identical in both sign-in worlds.
+
+Google needs one-time setup: Supabase dashboard → Authentication → Providers
+→ Google, with an OAuth client from Google Cloud Console (authorised redirect
+URI: `https://<project-ref>.supabase.co/auth/v1/callback`). Email codes work
+out of the box, with one caveat: Supabase's built-in mailer only delivers to
+the project's own team members until you configure custom SMTP (Settings →
+Authentication → SMTP) — add your operator to the Supabase project team, or
+set up SMTP, or have them use Google.
+
+Local development, with no Supabase configured, falls back to the passcode
+form automatically.
+
+## Zoho Books sync
+
+One-way, Zoho → Foundery: Zoho stays the accounting system of record, and
+Foundery mirrors it to drive the chasing feed and the P&L. A **Sync Zoho**
+button on the invoices page (founder only) plus a nightly cron at 08:00 IST.
+Invoices are matched to clients **by customer name** (case-insensitive);
+unmatched customers are skipped and named so you can add them — sync never
+invents clients. Re-syncs update in place via Zoho's invoice id; invoices you
+raised by hand in Foundery are never touched.
+
+Setup (once):
+1. https://api-console.zoho.in → **Self Client** → note the Client ID/Secret.
+2. Generate a grant code with scope `ZohoBooks.invoices.READ` (10 minutes).
+3. Exchange it: `curl -X POST "https://accounts.zoho.in/oauth/v2/token?grant_type=authorization_code&client_id=…&client_secret=…&code=…"` → copy `refresh_token`.
+4. In Vercel, set `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`,
+   `ZOHO_ORG_ID` (Zoho Books → Settings → Organisation ID) and redeploy.
+
 ## Onboarding links
 
 Building a form gives you a public URL like `/onboard/xK3f…`. The token is 18

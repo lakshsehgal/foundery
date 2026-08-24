@@ -7,6 +7,7 @@ import { prettyDate, todayISO } from "@/lib/dates";
 import { PageBody, PageHeader, PolicyNote, StatTile } from "@/components/ui/primitives";
 import { Ticker } from "@/components/ui/ticker";
 import { InvoicesView, type InvoiceRowDisplay } from "./invoices-view";
+import { ZohoSyncButton } from "./zoho-sync-button";
 
 export const metadata: Metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
@@ -48,7 +49,9 @@ export default async function InvoicesPage() {
       <PageHeader
         title="Invoices"
         subtitle={`${open.length} open · ${overdue.length} overdue${toRaise ? ` · ${toRaise} still to raise` : ""}`}
-      />
+      >
+        {role === "founder" && <ZohoSyncButton />}
+      </PageHeader>
       <PageBody width={1160}>
         <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile

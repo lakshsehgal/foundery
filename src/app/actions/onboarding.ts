@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
 import { getDb, logAudit, named } from "@/lib/db";
-import { FIELD_TYPES, type OnboardingField } from "@/lib/taxonomy";
-import { getFormByToken } from "@/lib/queries";
+import {
+  ACCESS_ITEMS, FIELD_TYPES, ONBOARDING_DETAIL_FIELDS, type OnboardingField,
+} from "@/lib/taxonomy";
+import { getFormByToken, getGuidedByToken, publicWelcomeUrl } from "@/lib/queries";
 import type { ActionState } from "./clients";
 
 function text(form: FormData, key: string): string | null {
@@ -165,4 +167,130 @@ export async function submitOnboarding(_prev: SubmitState, form: FormData): Prom
 
   revalidatePath("/onboarding");
   return { done: true };
+}
+
+/* ------------------------------------------------------ guided onboarding */
+
+/**
+ * "Start onboarding" on a client card. One live onboarding per client: if one
+ * already exists it's reused, so the button doubles as "get me the link".
+ */
+export async function startOnboarding(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const role = await requireRole();
+  const clientId = Number(form.get("client_id") ?? 0);
+  if (!clientId) return { error: "No client given." };
+
+  const db = await getDb();
+  const [client] = await db.query<{ name: string }>(
+    `SELECT name FROM foundery.clients WHERE id = $1`,
+    [clientId],
+  );
+  if (!client) return { error: "That client no longer exists." };
+
+  try {
+    const [existing] = await db.query<{ token: string }>(
+      `SELECT token FROM foundery.onboardings WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [clientId],
+    );
+    if (existing) {
+      return { ok: `Onboarding link ready for ${client.name}.` };
+    }
+
+    await db.query(
+      `INSERT INTO foundery.onboardings (client_id, token) VALUES ($1, $2)`,
+      [clientId, newPublicToken()],
+    );
+    await logAudit(role, "onboarding_started", "client", clientId, client.name);
+    revalidatePath("/clients");
+    revalidatePath("/onboarding");
+    return { ok: `Onboarding created for ${client.name} — copy the link and send it.` };
+  } catch {
+    return {
+      error:
+        "The onboarding table isn't in the database yet — run db/schema.sql against it once (npm run db:setup or the Supabase SQL editor).",
+    };
+  }
+}
+
+export type WelcomeState = { error?: string; ok?: boolean };
+
+/** Step 1 of the client-facing flow: the fixed details form. Public. */
+export async function submitWelcomeDetails(
+  _prev: WelcomeState,
+  form: FormData,
+): Promise<WelcomeState> {
+  const token = String(form.get("token") ?? "");
+  const onboarding = await getGuidedByToken(token);
+  if (!onboarding) return { error: "This link isn't valid — ask your contact at Neuroid for a fresh one." };
+
+  const details: Record<string, string> = {};
+  for (const field of ONBOARDING_DETAIL_FIELDS) {
+    const value = String(form.get(`f_${field.key}`) ?? "").trim();
+    if (field.required && !value) return { error: `“${field.label}” is needed before you can continue.` };
+    if (value) details[field.key] = value.slice(0, 2000);
+  }
+
+  const db = await getDb();
+  await db.query(
+    `UPDATE foundery.onboardings
+     SET details = $1::jsonb,
+         status = CASE WHEN status = 'invited' THEN 'details_done' ELSE status END,
+         updated_at = now()
+     WHERE token = $2`,
+    [JSON.stringify(details), token],
+  );
+  await logAudit("public", "onboarding_details_submitted", "client", onboarding.client_id, onboarding.client_name);
+  revalidatePath(`/welcome/${token}`);
+  revalidatePath("/clients");
+  revalidatePath("/onboarding");
+  return { ok: true };
+}
+
+/** Step 2: the access checklist. Saveable in parts; completes when all done. */
+export async function saveWelcomeAccess(
+  _prev: WelcomeState,
+  form: FormData,
+): Promise<WelcomeState> {
+  const token = String(form.get("token") ?? "");
+  const onboarding = await getGuidedByToken(token);
+  if (!onboarding) return { error: "This link isn't valid — ask your contact at Neuroid for a fresh one." };
+
+  const access: Record<string, { done: boolean; note?: string }> = {};
+  for (const item of ACCESS_ITEMS) {
+    const done = form.get(`done_${item.key}`) !== null;
+    const note = String(form.get(`note_${item.key}`) ?? "").trim().slice(0, 500);
+    access[item.key] = note ? { done, note } : { done };
+  }
+  const allDone = ACCESS_ITEMS.every((item) => access[item.key]?.done);
+
+  const db = await getDb();
+  await db.query(
+    `UPDATE foundery.onboardings
+     SET access = $1::jsonb,
+         status = CASE WHEN $2 THEN 'completed' ELSE status END,
+         completed_at = CASE WHEN $2 AND completed_at IS NULL THEN now() ELSE completed_at END,
+         updated_at = now()
+     WHERE token = $3`,
+    [JSON.stringify(access), allDone, token],
+  );
+  await logAudit("public", allDone ? "onboarding_completed" : "onboarding_access_saved", "client", onboarding.client_id, onboarding.client_name);
+  revalidatePath(`/welcome/${token}`);
+  revalidatePath("/clients");
+  revalidatePath("/onboarding");
+  return { ok: true };
+}
+
+/** The personalised link for a client's onboarding, for the copy button. */
+export async function guidedLinkFor(clientId: number): Promise<string | null> {
+  await requireRole();
+  const db = await getDb();
+  try {
+    const [row] = await db.query<{ token: string }>(
+      `SELECT token FROM foundery.onboardings WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [clientId],
+    );
+    return row ? publicWelcomeUrl(row.token) : null;
+  } catch {
+    return null;
+  }
 }

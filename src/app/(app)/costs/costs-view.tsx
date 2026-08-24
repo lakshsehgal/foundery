@@ -28,6 +28,7 @@ export function CostsView({
 }) {
   const [editing, setEditing] = useState<CostView | null>(null);
   const [open, setOpen] = useState(false);
+  const [openedAt, setOpenedAt] = useState(0);
   const [category, setCategory] = useState<CostCategory | "all">("all");
 
   const grandTotal = totals.reduce((sum, row) => sum + row.total, 0);
@@ -36,6 +37,7 @@ export function CostsView({
   function edit(cost: CostView | null) {
     setEditing(cost);
     setOpen(true);
+    setOpenedAt((n) => n + 1);
   }
 
   return (
@@ -199,7 +201,7 @@ export function CostsView({
 
       {canEdit && (
         <CostEditor
-          key={editing?.id ?? "new"}
+          key={`${editing?.id ?? "new"}-${openedAt}`}
           open={open}
           onClose={() => setOpen(false)}
           cost={editing}

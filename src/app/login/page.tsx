@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { currentRole } from "@/lib/auth";
+import { identityConfigured } from "@/lib/identity";
 import { Logo } from "@/components/ui/primitives";
 import { LoginForm } from "./login-form";
+import { OtpLoginForm } from "./otp-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -12,8 +14,16 @@ const PROMISES: [string, string][] = [
   ["Numbers that stay yours", "Your operator runs the day. Salaries, margins and profit stay behind your passcode."],
 ];
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   if (await currentRole()) redirect("/");
+  const { error } = await searchParams;
+  // Passwordless when Supabase is wired up; the passcode form only survives
+  // as the local-dev fallback where there is no Supabase to verify against.
+  const passwordless = identityConfigured();
 
   return (
     <main className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
@@ -79,7 +89,7 @@ export default async function LoginPage() {
           <div className="mb-10 lg:hidden">
             <Logo size={28} />
           </div>
-          <LoginForm />
+          {passwordless ? <OtpLoginForm googleError={error} /> : <LoginForm />}
         </div>
       </section>
     </main>

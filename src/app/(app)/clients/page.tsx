@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
 import { policyFor } from "@/lib/policy";
-import { listClients } from "@/lib/queries";
+import { listClients, listGuidedOnboardings, publicWelcomeUrl } from "@/lib/queries";
 import { defaultCurrency, fmtMoney, symbolFor } from "@/lib/money";
 import { marginPct, monthlyRevenue } from "@/lib/economics";
 import { PageBody, PageHeader, PolicyNote } from "@/components/ui/primitives";
@@ -12,8 +12,23 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   const role = await requireRole();
-  const [policy, clients] = await Promise.all([policyFor(role), listClients(role)]);
+  const [policy, clients, guided] = await Promise.all([
+    policyFor(role),
+    listClients(role),
+    listGuidedOnboardings(),
+  ]);
   const currency = defaultCurrency();
+
+  // Latest onboarding per client, with its shareable link, for the cards.
+  const onboardings: Record<number, { status: string; url: string }> = {};
+  for (const record of guided) {
+    if (!onboardings[record.client_id]) {
+      onboardings[record.client_id] = {
+        status: record.status,
+        url: publicWelcomeUrl(record.token),
+      };
+    }
+  }
 
   // Money is formatted and margins are worked out here, on the server: the
   // currency rules stay in one place, and a redacted figure is never handed to
@@ -59,6 +74,7 @@ export default async function ClientsPage() {
           canEditValues={policy.clientValues}
           currencySymbol={symbolFor(currency)}
           money={money}
+          onboardings={onboardings}
         />
       </PageBody>
     </>

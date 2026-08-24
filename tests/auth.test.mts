@@ -76,3 +76,24 @@ describe("public onboarding links", () => {
     }
   });
 });
+
+describe("email allowlists", () => {
+  test("roles come from the lists, case-insensitively, and default founder works", async () => {
+    const { roleForEmail } = await import("../src/lib/identity");
+
+    delete process.env.FOUNDERY_FOUNDER_EMAILS;
+    delete process.env.FOUNDERY_OPERATOR_EMAILS;
+    assert.equal(roleForEmail("laksh@neuroidmedia.com"), "founder", "default founder");
+    assert.equal(roleForEmail("LAKSH@NeuroidMedia.com"), "founder", "case-insensitive");
+    assert.equal(roleForEmail("stranger@example.com"), null);
+
+    process.env.FOUNDERY_FOUNDER_EMAILS = "boss@x.com";
+    process.env.FOUNDERY_OPERATOR_EMAILS = "ops@x.com, second@x.com";
+    assert.equal(roleForEmail("boss@x.com"), "founder");
+    assert.equal(roleForEmail("ops@x.com"), "operator");
+    assert.equal(roleForEmail("second@x.com"), "operator");
+    assert.equal(roleForEmail("laksh@neuroidmedia.com"), null, "explicit list replaces the default");
+    delete process.env.FOUNDERY_FOUNDER_EMAILS;
+    delete process.env.FOUNDERY_OPERATOR_EMAILS;
+  });
+});

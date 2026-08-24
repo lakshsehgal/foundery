@@ -569,3 +569,82 @@ export function publicFormUrl(token: string): string {
   ).replace(/\/$/, "");
   return `${base}/onboard/${token}`;
 }
+
+/* ---------------------------------------------------- guided onboardings */
+
+export type GuidedOnboarding = {
+  id: number;
+  client_id: number;
+  client_name: string;
+  token: string;
+  status: "invited" | "details_done" | "completed";
+  details: Record<string, string>;
+  access: Record<string, { done: boolean; note?: string }>;
+  created_at: string;
+  completed_at: string | null;
+};
+
+function toRecord<T>(value: unknown): Record<string, T> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, T>)
+    : {};
+}
+
+function toGuided(row: {
+  id: number; client_id: number; client_name: string; token: string; status: string;
+  details: unknown; access: unknown; created_at: string; completed_at: string | null;
+}): GuidedOnboarding {
+  return {
+    ...row,
+    status: row.status as GuidedOnboarding["status"],
+    details: toRecord<string>(row.details),
+    access: toRecord<{ done: boolean; note?: string }>(row.access),
+  };
+}
+
+export async function listGuidedOnboardings(): Promise<GuidedOnboarding[]> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<Parameters<typeof toGuided>[0]>(
+      `SELECT o.id, o.client_id, c.name AS client_name, o.token, o.status,
+              o.details, o.access, o.created_at, o.completed_at
+       FROM foundery.onboardings o
+       JOIN foundery.clients c ON c.id = o.client_id
+       ORDER BY o.created_at DESC`,
+    );
+    return rows.map(toGuided);
+  } catch {
+    // The table ships in db/schema.sql; a database that hasn't had the
+    // updated schema applied yet shouldn't take the clients page down with
+    // it. Empty until `npm run db:setup` (or the SQL editor) catches up.
+    console.warn("foundery.onboardings missing — re-run db/schema.sql to enable guided onboarding");
+    return [];
+  }
+}
+
+export async function getGuidedByToken(token: string): Promise<GuidedOnboarding | null> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<Parameters<typeof toGuided>[0]>(
+      `SELECT o.id, o.client_id, c.name AS client_name, o.token, o.status,
+              o.details, o.access, o.created_at, o.completed_at
+       FROM foundery.onboardings o
+       JOIN foundery.clients c ON c.id = o.client_id
+       WHERE o.token = $1`,
+      [token],
+    );
+    return rows[0] ? toGuided(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function publicWelcomeUrl(token: string): string {
+  const base = (
+    process.env.FOUNDERY_PUBLIC_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000")
+  ).replace(/\/$/, "");
+  return `${base}/welcome/${token}`;
+}

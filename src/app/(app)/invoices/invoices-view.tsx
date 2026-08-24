@@ -69,6 +69,7 @@ export function InvoicesView({
   const [filter, setFilter] = useState("open");
   const [editing, setEditing] = useState<InvoiceView | null>(null);
   const [open, setOpen] = useState(false);
+  const [openedAt, setOpenedAt] = useState(0);
 
   const shown = useMemo(() => {
     if (filter === "all") return invoices;
@@ -80,6 +81,7 @@ export function InvoicesView({
   function edit(invoice: InvoiceView | null) {
     setEditing(invoice);
     setOpen(true);
+    setOpenedAt((n) => n + 1);
   }
 
   return (
@@ -225,7 +227,7 @@ export function InvoicesView({
       </Card>
 
       <InvoiceEditor
-        key={editing?.id ?? "new"}
+        key={`${editing?.id ?? "new"}-${openedAt}`}
         open={open}
         onClose={() => setOpen(false)}
         invoice={editing}
