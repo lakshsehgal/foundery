@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
-import { getDb, logAudit } from "@/lib/db";
+import { getDb, logAudit, named } from "@/lib/db";
 import { FIELD_TYPES, type OnboardingField } from "@/lib/taxonomy";
 import { getFormByToken } from "@/lib/queries";
 import type { ActionState } from "./clients";
@@ -55,7 +55,7 @@ function readFields(form: FormData): OnboardingField[] {
 /** Both roles run onboarding, so both can build and share a form. */
 export async function saveForm(_prev: ActionState, form: FormData): Promise<ActionState> {
   const role = await requireRole();
-  const db = getDb();
+  const db = await getDb();
 
   const id = Number(form.get("id") ?? 0) || null;
   const title = String(form.get("title") ?? "").trim();
@@ -74,22 +74,27 @@ export async function saveForm(_prev: ActionState, form: FormData): Promise<Acti
   };
 
   if (id) {
-    db.prepare(
-      `UPDATE onboarding_forms SET title=@title, intro=@intro, client_id=@client_id,
-         fields=@fields, status=@status WHERE id=@id`,
-    ).run({ ...payload, id });
-    logAudit(role, "form_updated", "form", id, title);
+    await db.query(
+      ...named(
+        `UPDATE foundery.onboarding_forms SET title=@title, intro=@intro, client_id=@client_id,
+           fields=@fields::jsonb, status=@status WHERE id=@id`,
+        { ...payload, id },
+      ),
+    );
+    await logAudit(role, "form_updated", "form", id, title);
     revalidatePath("/onboarding");
     return { ok: "Form updated." };
   }
 
-  const result = db
-    .prepare(
-      `INSERT INTO onboarding_forms (title, intro, token, client_id, fields, status, created_by)
-       VALUES (@title, @intro, @token, @client_id, @fields, @status, @created_by)`,
-    )
-    .run({ ...payload, token: newPublicToken(), created_by: role });
-  logAudit(role, "form_created", "form", result.lastInsertRowid, title);
+  const [created] = await db.query<{ id: number }>(
+    ...named(
+      `INSERT INTO foundery.onboarding_forms (title, intro, token, client_id, fields, status, created_by)
+       VALUES (@title, @intro, @token, @client_id, @fields::jsonb, @status, @created_by)
+       RETURNING id`,
+      { ...payload, token: newPublicToken(), created_by: role },
+    ),
+  );
+  await logAudit(role, "form_created", "form", created.id, title);
 
   revalidatePath("/onboarding");
   return { ok: "Form created — the link is live." };
@@ -100,8 +105,12 @@ export async function rotateFormLink(_prev: ActionState, form: FormData): Promis
   const role = await requireRole();
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to rotate." };
-  getDb().prepare(`UPDATE onboarding_forms SET token = ? WHERE id = ?`).run(newPublicToken(), id);
-  logAudit(role, "form_link_rotated", "form", id);
+  const db = await getDb();
+  await db.query(`UPDATE foundery.onboarding_forms SET token = $1 WHERE id = $2`, [
+    newPublicToken(),
+    id,
+  ]);
+  await logAudit(role, "form_link_rotated", "form", id);
   revalidatePath("/onboarding");
   return { ok: "New link generated. The old one is dead." };
 }
@@ -110,8 +119,9 @@ export async function deleteForm(_prev: ActionState, form: FormData): Promise<Ac
   await requireFounder();
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to delete." };
-  getDb().prepare(`DELETE FROM onboarding_forms WHERE id = ?`).run(id);
-  logAudit("founder", "form_deleted", "form", id);
+  const db = await getDb();
+  await db.query(`DELETE FROM foundery.onboarding_forms WHERE id = $1`, [id]);
+  await logAudit("founder", "form_deleted", "form", id);
   revalidatePath("/onboarding");
   return { ok: "Form and its responses removed." };
 }
@@ -130,7 +140,7 @@ export type SubmitState = { error?: string; done?: boolean };
  */
 export async function submitOnboarding(_prev: SubmitState, form: FormData): Promise<SubmitState> {
   const token = String(form.get("token") ?? "");
-  const definition = getFormByToken(token);
+  const definition = await getFormByToken(token);
   if (!definition) return { error: "This link isn't valid. Ask your contact at Neuroid for a fresh one." };
   if (definition.status === "closed") {
     return { error: "This form has been closed. Ask your contact at Neuroid for a fresh link." };
@@ -146,10 +156,12 @@ export async function submitOnboarding(_prev: SubmitState, form: FormData): Prom
     if (value) answers[field.key] = value.slice(0, 4000);
   }
 
-  getDb()
-    .prepare(`INSERT INTO onboarding_submissions (form_id, answers) VALUES (?, ?)`)
-    .run(definition.id, JSON.stringify(answers));
-  logAudit("public", "onboarding_submitted", "form", definition.id, definition.title);
+  const db = await getDb();
+  await db.query(
+    `INSERT INTO foundery.onboarding_submissions (form_id, answers) VALUES ($1, $2::jsonb)`,
+    [definition.id, JSON.stringify(answers)],
+  );
+  await logAudit("public", "onboarding_submitted", "form", definition.id, definition.title);
 
   revalidatePath("/onboarding");
   return { done: true };

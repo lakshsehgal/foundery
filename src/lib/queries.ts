@@ -1,6 +1,6 @@
 import "server-only";
 import { getDb } from "./db";
-import type { Role } from "./auth";
+import type { Role } from "./session";
 import { policyFor } from "./policy";
 import { monthlyEquivalent } from "./money";
 import { billingDateFor, daysUntil, monthKey, todayISO, addDays } from "./dates";
@@ -36,19 +36,16 @@ export type ClientView = {
 
 type ClientRow = {
   id: number; name: string; slug: string; status: string; engagement: string;
-  vip: number; services: string; owner: string | null; start_date: string | null;
+  vip: boolean; services: unknown; owner: string | null; start_date: string | null;
   end_date: string | null; billing_day: number; terms_days: number; currency: string;
   notes: string | null; retainer_amount: number; one_time_value: number;
   delivery_cost: number; health: string;
 };
 
-function parseServices(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
-  } catch {
-    return [];
-  }
+/** jsonb arrives already parsed; anything else is treated as empty. */
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
 }
 
 function toClientView(row: ClientRow, showValues: boolean): ClientView {
@@ -58,8 +55,8 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     slug: row.slug,
     status: row.status as ClientStatus,
     engagement: row.engagement as Engagement,
-    vip: row.vip === 1,
-    services: parseServices(row.services),
+    vip: row.vip,
+    services: toStringArray(row.services),
     owner: row.owner,
     start_date: row.start_date,
     end_date: row.end_date,
@@ -74,31 +71,30 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
   };
 }
 
-export function listClients(role: Role): ClientView[] {
-  const show = policyFor(role).clientValues;
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM clients
-       ORDER BY (status = 'active') DESC, vip DESC, name COLLATE NOCASE`,
-    )
-    .all() as ClientRow[];
-  return rows.map((row) => toClientView(row, show));
+export async function listClients(role: Role): Promise<ClientView[]> {
+  const [{ clientValues }, db] = await Promise.all([policyFor(role), getDb()]);
+  const rows = await db.query<ClientRow>(
+    `SELECT * FROM foundery.clients
+     ORDER BY (status = 'active') DESC, vip DESC, lower(name)`,
+  );
+  return rows.map((row) => toClientView(row, clientValues));
 }
 
-export function getClient(role: Role, id: number): ClientView | null {
-  const row = getDb().prepare(`SELECT * FROM clients WHERE id = ?`).get(id) as ClientRow | undefined;
-  if (!row) return null;
-  return toClientView(row, policyFor(role).clientValues);
+export async function getClient(role: Role, id: number): Promise<ClientView | null> {
+  const [{ clientValues }, db] = await Promise.all([policyFor(role), getDb()]);
+  const rows = await db.query<ClientRow>(`SELECT * FROM foundery.clients WHERE id = $1`, [id]);
+  return rows[0] ? toClientView(rows[0], clientValues) : null;
 }
 
 /** Names and ids only — safe for any role, used to populate pickers. */
-export function clientOptions(): { id: number; name: string; terms_days: number; billing_day: number }[] {
-  return getDb()
-    .prepare(
-      `SELECT id, name, terms_days, billing_day FROM clients
-       WHERE status != 'churned' ORDER BY name COLLATE NOCASE`,
-    )
-    .all() as { id: number; name: string; terms_days: number; billing_day: number }[];
+export async function clientOptions(): Promise<
+  { id: number; name: string; terms_days: number; billing_day: number }[]
+> {
+  const db = await getDb();
+  return db.query(
+    `SELECT id, name, terms_days, billing_day FROM foundery.clients
+     WHERE status <> 'churned' ORDER BY lower(name)`,
+  );
 }
 
 /* ----------------------------------------------------------------- costs */
@@ -128,7 +124,7 @@ export type CostView = {
 type CostRow = {
   id: number; category: string; label: string; person: string | null; amount: number;
   cadence: string; currency: string; start_date: string | null; end_date: string | null;
-  active: number; client_id: number | null; notes: string | null;
+  active: boolean; client_id: number | null; notes: string | null;
 };
 
 /**
@@ -139,15 +135,16 @@ type CostRow = {
  * headcount. Individual amounts and names are dropped before the data leaves
  * this function, so they never reach the browser at all.
  */
-export function listCosts(role: Role, opts: { includeInactive?: boolean } = {}): CostView[] {
-  const policy = policyFor(role);
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM costs
-       ${opts.includeInactive ? "" : "WHERE active = 1"}
-       ORDER BY category, amount DESC`,
-    )
-    .all() as CostRow[];
+export async function listCosts(
+  role: Role,
+  opts: { includeInactive?: boolean } = {},
+): Promise<CostView[]> {
+  const [policy, db] = await Promise.all([policyFor(role), getDb()]);
+  const rows = await db.query<CostRow>(
+    `SELECT * FROM foundery.costs
+     ${opts.includeInactive ? "" : "WHERE active"}
+     ORDER BY category, amount DESC`,
+  );
 
   const out: CostView[] = [];
   const collapsed = new Map<CostCategory, { total: number; count: number; currency: string }>();
@@ -165,7 +162,7 @@ export function listCosts(role: Role, opts: { includeInactive?: boolean } = {}):
         cadence: row.cadence,
         monthly,
         currency: row.currency,
-        active: row.active === 1,
+        active: row.active,
         start_date: row.start_date,
         end_date: row.end_date,
         notes: row.notes,
@@ -204,20 +201,23 @@ export function listCosts(role: Role, opts: { includeInactive?: boolean } = {}):
     });
   }
 
-  const order = COST_CATEGORIES.map((c) => c.key);
+  const order = COST_CATEGORIES.map((definition) => definition.key);
   return out.sort(
     (a, b) => order.indexOf(a.category) - order.indexOf(b.category) || (b.monthly ?? 0) - (a.monthly ?? 0),
   );
 }
 
 /** Monthly run-rate per category. Visible in full to both roles. */
-export function costTotals(): { category: CostCategory; total: number; count: number }[] {
-  const rows = getDb()
-    .prepare(`SELECT category, amount, cadence FROM costs WHERE active = 1`)
-    .all() as { category: string; amount: number; cadence: string }[];
+export async function costTotals(): Promise<
+  { category: CostCategory; total: number; count: number }[]
+> {
+  const db = await getDb();
+  const rows = await db.query<{ category: string; amount: number; cadence: string }>(
+    `SELECT category, amount, cadence FROM foundery.costs WHERE active`,
+  );
 
   const map = new Map<CostCategory, { total: number; count: number }>();
-  for (const c of COST_CATEGORIES) map.set(c.key, { total: 0, count: 0 });
+  for (const definition of COST_CATEGORIES) map.set(definition.key, { total: 0, count: 0 });
   for (const row of rows) {
     const key = row.category as CostCategory;
     const bucket = map.get(key) ?? { total: 0, count: 0 };
@@ -225,37 +225,41 @@ export function costTotals(): { category: CostCategory; total: number; count: nu
     bucket.count += 1;
     map.set(key, bucket);
   }
-  return COST_CATEGORIES.map((c) => ({ category: c.key, ...map.get(c.key)! }));
+  return COST_CATEGORIES.map((definition) => ({
+    category: definition.key,
+    ...map.get(definition.key)!,
+  }));
 }
 
-export function monthlyBurn(): number {
-  return costTotals().reduce((sum, row) => sum + row.total, 0);
+export async function monthlyBurn(): Promise<number> {
+  const totals = await costTotals();
+  return totals.reduce((sum, row) => sum + row.total, 0);
 }
 
 /**
  * What the cost base actually was in a given month — used by the P&L, where
  * today's run-rate would be the wrong number for a month six months ago.
  */
-export function costsForMonth(month: string): number {
+export async function costsForMonth(month: string): Promise<number> {
+  const db = await getDb();
   const start = `${month}-01`;
   const end = billingDateFor(month, 31);
-  const rows = getDb()
-    .prepare(
-      `SELECT amount, cadence FROM costs
-       WHERE (start_date IS NULL OR start_date <= ?)
-         AND (end_date   IS NULL OR end_date   >= ?)`,
-    )
-    .all(end, start) as { amount: number; cadence: string }[];
-  const recurring = rows.reduce((sum, r) => sum + monthlyEquivalent(r.amount, r.cadence), 0);
 
-  const oneOffs = getDb()
-    .prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total FROM costs
-       WHERE cadence = 'one_time' AND start_date >= ? AND start_date <= ?`,
-    )
-    .get(start, end) as { total: number };
+  const rows = await db.query<{ amount: number; cadence: string }>(
+    `SELECT amount, cadence FROM foundery.costs
+     WHERE (start_date IS NULL OR start_date <= $1)
+       AND (end_date   IS NULL OR end_date   >= $2)`,
+    [end, start],
+  );
+  const recurring = rows.reduce((sum, row) => sum + monthlyEquivalent(row.amount, row.cadence), 0);
 
-  return recurring + oneOffs.total;
+  const [oneOffs] = await db.query<{ total: number }>(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM foundery.costs
+     WHERE cadence = 'one_time' AND start_date >= $1 AND start_date <= $2`,
+    [start, end],
+  );
+
+  return recurring + Number(oneOffs?.total ?? 0);
 }
 
 /* -------------------------------------------------------------- invoices */
@@ -283,7 +287,7 @@ export type InvoiceView = {
 };
 
 type InvoiceRow = {
-  id: number; client_id: number; client_name: string; vip: number; number: string;
+  id: number; client_id: number; client_name: string; vip: boolean; number: string;
   period: string | null; issue_date: string; due_date: string; terms_days: number;
   amount: number; amount_paid: number; currency: string; status: string;
   paid_date: string | null; notes: string | null;
@@ -296,7 +300,7 @@ function toInvoiceView(row: InvoiceRow, showAmounts: boolean, today: string): In
     id: row.id,
     client_id: row.client_id,
     client_name: row.client_name,
-    vip: row.vip === 1,
+    vip: row.vip,
     number: row.number,
     period: row.period,
     issue_date: row.issue_date,
@@ -314,16 +318,14 @@ function toInvoiceView(row: InvoiceRow, showAmounts: boolean, today: string): In
   };
 }
 
-export function listInvoices(role: Role, today = todayISO()): InvoiceView[] {
-  const show = policyFor(role).invoiceAmounts;
-  const rows = getDb()
-    .prepare(
-      `SELECT i.*, c.name AS client_name, c.vip AS vip
-       FROM invoices i JOIN clients c ON c.id = i.client_id
-       ORDER BY (i.status IN ('paid','void')) ASC, i.due_date ASC`,
-    )
-    .all() as InvoiceRow[];
-  return rows.map((row) => toInvoiceView(row, show, today));
+export async function listInvoices(role: Role, today = todayISO()): Promise<InvoiceView[]> {
+  const [{ invoiceAmounts }, db] = await Promise.all([policyFor(role), getDb()]);
+  const rows = await db.query<InvoiceRow>(
+    `SELECT i.*, c.name AS client_name, c.vip AS vip
+     FROM foundery.invoices i JOIN foundery.clients c ON c.id = i.client_id
+     ORDER BY (i.status IN ('paid','void')) ASC, i.due_date ASC`,
+  );
+  return rows.map((row) => toInvoiceView(row, invoiceAmounts, today));
 }
 
 /**
@@ -348,10 +350,10 @@ export type Reminder = {
 
 const DUE_SOON_WINDOW_DAYS = 10;
 
-export function reminders(role: Role, today = todayISO()): Reminder[] {
+export async function reminders(role: Role, today = todayISO()): Promise<Reminder[]> {
   const out: Reminder[] = [];
 
-  for (const invoice of listInvoices(role, today)) {
+  for (const invoice of await listInvoices(role, today)) {
     if (invoice.status === "paid" || invoice.status === "void") continue;
     const days = invoice.daysUntilDue ?? 0;
     if (days < 0) {
@@ -388,7 +390,7 @@ export function reminders(role: Role, today = todayISO()): Reminder[] {
     }
   }
 
-  out.push(...invoicesToRaise(role, today));
+  out.push(...(await invoicesToRaise(role, today)));
 
   const rank = { overdue: 0, due_soon: 1, to_raise: 2 };
   return out.sort((a, b) => rank[a.kind] - rank[b.kind] || a.days - b.days);
@@ -401,30 +403,30 @@ export function reminders(role: Role, today = todayISO()): Reminder[] {
  * costs an agency a month of cash and never shows up on an invoice list,
  * because the missing invoice isn't there to be listed.
  */
-export function invoicesToRaise(role: Role, today = todayISO()): Reminder[] {
-  const show = policyFor(role).invoiceAmounts;
+export async function invoicesToRaise(role: Role, today = todayISO()): Promise<Reminder[]> {
+  const [{ invoiceAmounts }, db] = await Promise.all([policyFor(role), getDb()]);
   const month = monthKey(new Date(today));
-  const rows = getDb()
-    .prepare(
-      `SELECT id, name, vip, billing_day, terms_days, retainer_amount, currency
-       FROM clients
-       WHERE status = 'active' AND engagement = 'retainer'`,
-    )
-    .all() as {
-      id: number; name: string; vip: number; billing_day: number;
-      terms_days: number; retainer_amount: number; currency: string;
-    }[];
+
+  // One query rather than one per client: the clients with no invoice raised
+  // in this month at all.
+  const rows = await db.query<{
+    id: number; name: string; vip: boolean; billing_day: number;
+    terms_days: number; retainer_amount: number; currency: string;
+  }>(
+    `SELECT c.id, c.name, c.vip, c.billing_day, c.terms_days, c.retainer_amount, c.currency
+     FROM foundery.clients c
+     WHERE c.status = 'active' AND c.engagement = 'retainer'
+       AND NOT EXISTS (
+         SELECT 1 FROM foundery.invoices i
+         WHERE i.client_id = c.id
+           AND i.status <> 'void'
+           AND to_char(i.issue_date, 'YYYY-MM') = $1
+       )`,
+    [month],
+  );
 
   const out: Reminder[] = [];
   for (const client of rows) {
-    const already = getDb()
-      .prepare(
-        `SELECT COUNT(*) AS n FROM invoices
-         WHERE client_id = ? AND status != 'void' AND substr(issue_date, 1, 7) = ?`,
-      )
-      .get(client.id, month) as { n: number };
-    if (already.n > 0) continue;
-
     const raiseOn = billingDateFor(month, client.billing_day);
     const daysToRaise = daysUntil(raiseOn, today);
     // Surface it from three days ahead of the billing date onward.
@@ -438,8 +440,8 @@ export function invoicesToRaise(role: Role, today = todayISO()): Reminder[] {
           : `Raise ${client.name}'s retainer invoice`,
       detail: `Billing day ${client.billing_day}, net ${client.terms_days} — no invoice raised for this month yet.`,
       clientName: client.name,
-      vip: client.vip === 1,
-      amount: show ? client.retainer_amount : null,
+      vip: client.vip,
+      amount: invoiceAmounts ? client.retainer_amount : null,
       currency: client.currency,
       dueDate: addDays(raiseOn, client.terms_days),
       days: daysToRaise,
@@ -449,12 +451,14 @@ export function invoicesToRaise(role: Role, today = todayISO()): Reminder[] {
   return out;
 }
 
-export function nextInvoiceNumber(): string {
+export async function nextInvoiceNumber(): Promise<string> {
+  const db = await getDb();
   const year = new Date().getFullYear();
-  const row = getDb()
-    .prepare(`SELECT number FROM invoices WHERE number LIKE ? ORDER BY number DESC LIMIT 1`)
-    .get(`NRD-${year}-%`) as { number: string } | undefined;
-  const last = row ? Number(row.number.split("-").pop()) : 0;
+  const rows = await db.query<{ number: string }>(
+    `SELECT number FROM foundery.invoices WHERE number LIKE $1 ORDER BY number DESC LIMIT 1`,
+    [`NRD-${year}-%`],
+  );
+  const last = rows[0] ? Number(rows[0].number.split("-").pop()) : 0;
   return `NRD-${year}-${String((Number.isFinite(last) ? last : 0) + 1).padStart(3, "0")}`;
 }
 
@@ -475,47 +479,45 @@ export type FormView = {
   lastSubmission: string | null;
 };
 
-export function listForms(): FormView[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT f.*, c.name AS client_name,
-              (SELECT COUNT(*) FROM onboarding_submissions s WHERE s.form_id = f.id) AS submissions,
-              (SELECT MAX(submitted_at) FROM onboarding_submissions s WHERE s.form_id = f.id) AS last_submission
-       FROM onboarding_forms f
-       LEFT JOIN clients c ON c.id = f.client_id
-       ORDER BY f.created_at DESC`,
-    )
-    .all() as (Omit<FormView, "fields" | "submissions" | "lastSubmission"> & {
-      fields: string; submissions: number; last_submission: string | null;
-    })[];
+function toFields(value: unknown): OnboardingField[] {
+  return Array.isArray(value) ? (value as OnboardingField[]) : [];
+}
+
+export async function listForms(): Promise<FormView[]> {
+  const db = await getDb();
+  const rows = await db.query<
+    Omit<FormView, "fields" | "submissions" | "lastSubmission"> & {
+      fields: unknown; submissions: number; last_submission: string | null;
+    }
+  >(
+    `SELECT f.*, c.name AS client_name,
+            (SELECT COUNT(*) FROM foundery.onboarding_submissions s WHERE s.form_id = f.id) AS submissions,
+            (SELECT MAX(submitted_at) FROM foundery.onboarding_submissions s WHERE s.form_id = f.id) AS last_submission
+     FROM foundery.onboarding_forms f
+     LEFT JOIN foundery.clients c ON c.id = f.client_id
+     ORDER BY f.created_at DESC`,
+  );
 
   return rows.map((row) => ({
     ...row,
-    fields: safeFields(row.fields),
+    fields: toFields(row.fields),
     submissions: row.submissions,
     lastSubmission: row.last_submission,
   }));
 }
 
-export function getFormByToken(token: string): FormView | null {
-  const row = getDb()
-    .prepare(
-      `SELECT f.*, c.name AS client_name, 0 AS submissions, NULL AS last_submission
-       FROM onboarding_forms f LEFT JOIN clients c ON c.id = f.client_id
-       WHERE f.token = ?`,
-    )
-    .get(token) as (FormView & { fields: string }) | undefined;
+export async function getFormByToken(token: string): Promise<FormView | null> {
+  const db = await getDb();
+  const rows = await db.query<FormView & { fields: unknown }>(
+    `SELECT f.*, c.name AS client_name, 0 AS submissions, NULL AS last_submission
+     FROM foundery.onboarding_forms f
+     LEFT JOIN foundery.clients c ON c.id = f.client_id
+     WHERE f.token = $1`,
+    [token],
+  );
+  const row = rows[0];
   if (!row) return null;
-  return { ...row, fields: safeFields(row.fields), submissions: 0, lastSubmission: null };
-}
-
-function safeFields(raw: string): OnboardingField[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return { ...row, fields: toFields(row.fields), submissions: 0, lastSubmission: null };
 }
 
 export type SubmissionView = {
@@ -528,43 +530,42 @@ export type SubmissionView = {
   submitted_at: string;
 };
 
-export function listSubmissions(formId?: number): SubmissionView[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT s.id, s.form_id, s.answers, s.submitted_at,
-              f.title AS form_title, f.fields AS fields, c.name AS client_name
-       FROM onboarding_submissions s
-       JOIN onboarding_forms f ON f.id = s.form_id
-       LEFT JOIN clients c ON c.id = f.client_id
-       ${formId ? "WHERE s.form_id = ?" : ""}
-       ORDER BY s.submitted_at DESC`,
-    )
-    .all(...(formId ? [formId] : [])) as {
-      id: number; form_id: number; answers: string; submitted_at: string;
-      form_title: string; fields: string; client_name: string | null;
-    }[];
+export async function listSubmissions(formId?: number): Promise<SubmissionView[]> {
+  const db = await getDb();
+  const rows = await db.query<{
+    id: number; form_id: number; answers: unknown; submitted_at: string;
+    form_title: string; fields: unknown; client_name: string | null;
+  }>(
+    `SELECT s.id, s.form_id, s.answers, s.submitted_at,
+            f.title AS form_title, f.fields AS fields, c.name AS client_name
+     FROM foundery.onboarding_submissions s
+     JOIN foundery.onboarding_forms f ON f.id = s.form_id
+     LEFT JOIN foundery.clients c ON c.id = f.client_id
+     ${formId ? "WHERE s.form_id = $1" : ""}
+     ORDER BY s.submitted_at DESC`,
+    formId ? [formId] : [],
+  );
 
-  return rows.map((row) => {
-    let answers: Record<string, string> = {};
-    try {
-      const parsed = JSON.parse(row.answers);
-      if (parsed && typeof parsed === "object") answers = parsed;
-    } catch {
-      answers = {};
-    }
-    return {
-      id: row.id,
-      form_id: row.form_id,
-      form_title: row.form_title,
-      client_name: row.client_name,
-      answers,
-      fields: safeFields(row.fields),
-      submitted_at: row.submitted_at,
-    };
-  });
+  return rows.map((row) => ({
+    id: row.id,
+    form_id: row.form_id,
+    form_title: row.form_title,
+    client_name: row.client_name,
+    answers:
+      row.answers && typeof row.answers === "object" && !Array.isArray(row.answers)
+        ? (row.answers as Record<string, string>)
+        : {},
+    fields: toFields(row.fields),
+    submitted_at: row.submitted_at,
+  }));
 }
 
 export function publicFormUrl(token: string): string {
-  const base = (process.env.FOUNDERY_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
+  const base = (
+    process.env.FOUNDERY_PUBLIC_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000")
+  ).replace(/\/$/, "");
   return `${base}/onboard/${token}`;
 }

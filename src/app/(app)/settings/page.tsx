@@ -13,20 +13,27 @@ export default async function SettingsPage() {
   await requireFounder();
 
   const currency = defaultCurrency();
-  const stored = new Map(readOperatorSwitches().map((row) => [row.key, row.value]));
+  const db = await getDb();
+
+  const [storedSwitches, audit, businessName, cashBuffer] = await Promise.all([
+    readOperatorSwitches(),
+    db.query<{
+      ts: string; actor: string; action: string; entity: string | null; detail: string | null;
+    }>(
+      `SELECT ts, actor, action, entity, detail FROM foundery.audit_log
+       ORDER BY ts DESC, id DESC LIMIT 25`,
+    ),
+    getSetting("business_name", "Neuroid Media"),
+    getSetting("cash_buffer", ""),
+  ]);
+
+  const stored = new Map(storedSwitches.map((row) => [row.key, row.value]));
   const switches = OPERATOR_SWITCHES.map((definition) => ({
-    key: definition.key,
-    label: definition.label,
-    hint: definition.hint,
+    key: definition.key as string,
+    label: definition.label as string,
+    hint: definition.hint as string,
     value: stored.get(definition.key) ?? definition.fallback === "1",
   }));
-
-  const audit = getDb()
-    .prepare(
-      `SELECT ts, actor, action, entity, detail FROM audit_log
-       ORDER BY ts DESC, id DESC LIMIT 25`,
-    )
-    .all() as { ts: string; actor: string; action: string; entity: string | null; detail: string | null }[];
 
   return (
     <>
@@ -35,8 +42,8 @@ export default async function SettingsPage() {
         <VisibilityForm switches={switches} currencySymbol={symbolFor(currency)} />
 
         <BusinessForm
-          businessName={getSetting("business_name", "Neuroid Media")}
-          cashBuffer={getSetting("cash_buffer", "")}
+          businessName={businessName}
+          cashBuffer={cashBuffer}
           currencySymbol={symbolFor(currency)}
         />
 

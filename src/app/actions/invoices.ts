@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole } from "@/lib/auth";
-import { getDb, logAudit } from "@/lib/db";
+import { getDb, logAudit, named } from "@/lib/db";
 import { addDays, todayISO } from "@/lib/dates";
 import { nextInvoiceNumber } from "@/lib/queries";
 import type { ActionState } from "./clients";
@@ -26,15 +26,16 @@ function num(form: FormData, key: string): number {
  */
 export async function saveInvoice(_prev: ActionState, form: FormData): Promise<ActionState> {
   const role = await requireRole();
-  const db = getDb();
+  const db = await getDb();
 
   const id = Number(form.get("id") ?? 0) || null;
   const clientId = Number(form.get("client_id") ?? 0);
   if (!clientId) return { error: "Pick a client." };
 
-  const client = db
-    .prepare(`SELECT name, terms_days, currency FROM clients WHERE id = ?`)
-    .get(clientId) as { name: string; terms_days: number; currency: string } | undefined;
+  const [client] = await db.query<{ name: string; terms_days: number; currency: string }>(
+    `SELECT name, terms_days, currency FROM foundery.clients WHERE id = $1`,
+    [clientId],
+  );
   if (!client) return { error: "That client no longer exists." };
 
   const issueDate = text(form, "issue_date") ?? todayISO();
@@ -48,9 +49,10 @@ export async function saveInvoice(_prev: ActionState, form: FormData): Promise<A
   const paidDate = status === "paid" ? (text(form, "paid_date") ?? todayISO()) : text(form, "paid_date");
 
   if (id) {
-    const existing = db.prepare(`SELECT amount, amount_paid FROM invoices WHERE id = ?`).get(id) as
-      | { amount: number; amount_paid: number }
-      | undefined;
+    const [existing] = await db.query<{ amount: number; amount_paid: number }>(
+      `SELECT amount, amount_paid FROM foundery.invoices WHERE id = $1`,
+      [id],
+    );
     if (!existing) return { error: "That invoice no longer exists." };
 
     const amount = role === "founder" ? num(form, "amount") : existing.amount;
@@ -61,12 +63,13 @@ export async function saveInvoice(_prev: ActionState, form: FormData): Promise<A
           ? num(form, "amount_paid")
           : existing.amount_paid;
 
-    db.prepare(
-      `UPDATE invoices SET client_id=@client_id, period=@period, issue_date=@issue_date,
-         due_date=@due_date, terms_days=@terms_days, amount=@amount, amount_paid=@amount_paid,
-         status=@status, paid_date=@paid_date, notes=@notes, updated_at=datetime('now')
-       WHERE id=@id`,
-    ).run({
+    await db.query(
+      ...named(
+        `UPDATE foundery.invoices SET client_id=@client_id, period=@period, issue_date=@issue_date,
+           due_date=@due_date, terms_days=@terms_days, amount=@amount, amount_paid=@amount_paid,
+           status=@status, paid_date=@paid_date, notes=@notes, updated_at=now()
+         WHERE id=@id`,
+        {
       id,
       client_id: clientId,
       period: text(form, "period"),
@@ -78,22 +81,24 @@ export async function saveInvoice(_prev: ActionState, form: FormData): Promise<A
       status,
       paid_date: paidDate,
       notes: text(form, "notes"),
-    });
-    logAudit(role, "invoice_updated", "invoice", id, `${client.name} → ${status}`);
+        },
+      ),
+    );
+    await logAudit(role, "invoice_updated", "invoice", id, `${client.name} → ${status}`);
   } else {
     const amount = role === "founder" ? num(form, "amount") : 0;
-    const number = text(form, "number") ?? nextInvoiceNumber();
-    const clash = db.prepare(`SELECT id FROM invoices WHERE number = ?`).get(number);
-    if (clash) return { error: `Invoice ${number} already exists.` };
+    const number = text(form, "number") ?? (await nextInvoiceNumber());
+    const clash = await db.query(`SELECT id FROM foundery.invoices WHERE number = $1`, [number]);
+    if (clash.length > 0) return { error: `Invoice ${number} already exists.` };
 
-    const result = db
-      .prepare(
-        `INSERT INTO invoices (client_id, number, period, issue_date, due_date, terms_days,
+    const [created] = await db.query<{ id: number }>(
+      ...named(
+        `INSERT INTO foundery.invoices (client_id, number, period, issue_date, due_date, terms_days,
            amount, amount_paid, currency, status, paid_date, notes)
          VALUES (@client_id, @number, @period, @issue_date, @due_date, @terms_days,
-           @amount, @amount_paid, @currency, @status, @paid_date, @notes)`,
-      )
-      .run({
+           @amount, @amount_paid, @currency, @status, @paid_date, @notes)
+         RETURNING id`,
+        {
         client_id: clientId,
         number,
         period: text(form, "period"),
@@ -106,8 +111,10 @@ export async function saveInvoice(_prev: ActionState, form: FormData): Promise<A
         status,
         paid_date: paidDate,
         notes: text(form, "notes"),
-      });
-    logAudit(role, "invoice_created", "invoice", result.lastInsertRowid, `${number} · ${client.name}`);
+        },
+      ),
+    );
+    await logAudit(role, "invoice_created", "invoice", created.id, `${number} · ${client.name}`);
   }
 
   revalidatePath("/invoices");
@@ -123,13 +130,14 @@ export async function markInvoicePaid(_prev: ActionState, form: FormData): Promi
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to mark." };
 
-  getDb()
-    .prepare(
-      `UPDATE invoices SET status='paid', amount_paid=amount, paid_date=?, updated_at=datetime('now')
-       WHERE id = ?`,
-    )
-    .run(todayISO(), id);
-  logAudit(role, "invoice_paid", "invoice", id);
+  const db = await getDb();
+  await db.query(
+    `UPDATE foundery.invoices
+     SET status='paid', amount_paid=amount, paid_date=$1, updated_at=now()
+     WHERE id = $2`,
+    [todayISO(), id],
+  );
+  await logAudit(role, "invoice_paid", "invoice", id);
 
   revalidatePath("/invoices");
   revalidatePath("/");
@@ -141,8 +149,9 @@ export async function deleteInvoice(_prev: ActionState, form: FormData): Promise
   await requireFounder();
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to delete." };
-  getDb().prepare(`DELETE FROM invoices WHERE id = ?`).run(id);
-  logAudit("founder", "invoice_deleted", "invoice", id);
+  const db = await getDb();
+  await db.query(`DELETE FROM foundery.invoices WHERE id = $1`, [id]);
+  await logAudit("founder", "invoice_deleted", "invoice", id);
   revalidatePath("/invoices");
   revalidatePath("/pnl");
   return { ok: "Invoice removed." };

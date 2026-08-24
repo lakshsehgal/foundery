@@ -19,10 +19,11 @@ export default async function FormSubmissionsPage({
 
   const { id } = await params;
   const formId = Number(id);
-  const form = listForms().find((candidate) => candidate.id === formId);
+  const forms = await listForms();
+  const form = forms.find((candidate) => candidate.id === formId);
   if (!form) notFound();
 
-  const submissions = listSubmissions(formId);
+  const submissions = await listSubmissions(formId);
 
   return (
     <>

@@ -1,181 +1,237 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Single SQLite connection, cached on globalThis so Next's dev-mode module
- * reloading doesn't open a new file handle on every request.
+ * The data layer.
+ *
+ * Two backends behind one tiny interface:
+ *
+ *   DATABASE_URL set  → PostgreSQL over `pg`. This is Supabase in production.
+ *   DATABASE_URL unset → PGlite, Postgres compiled to WASM, running in this
+ *                        process against a local directory. Same engine and
+ *                        the same SQL, so `npm run dev` and `npm test` need no
+ *                        database server and still exercise real Postgres.
+ *
+ * Both are configured to hand back the same JavaScript shapes — see
+ * TYPE_PARSERS. That matters more than it looks: `date` columns come back as
+ * plain 'YYYY-MM-DD' strings rather than Date objects, so a due date can never
+ * drift a day because the server happens to sit in a different timezone.
  */
+
+export type Row = Record<string, unknown>;
+
+export interface Db {
+  query<T = Row>(text: string, params?: unknown[]): Promise<T[]>;
+  exec(sql: string): Promise<void>;
+}
+
+/* --------------------------------------------------------------- type OIDs */
+
+const OID = {
+  INT8: 20,
+  NUMERIC: 1700,
+  DATE: 1082,
+  TIMESTAMP: 1114,
+  TIMESTAMPTZ: 1184,
+} as const;
+
+const asString = (value: string) => value;
+const asNumber = (value: string) => Number(value);
+
+/**
+ * Money is `numeric` in the schema, which both drivers return as a string to
+ * protect precision they assume you need. Foundery's largest realistic figure
+ * is a few crore, which a double holds exactly to the paisa, so parsing to a
+ * number here keeps every downstream sum ordinary arithmetic.
+ *
+ * Ids and counts are `bigint` for the same reason and get the same treatment.
+ */
+const TYPE_PARSERS: Record<number, (value: string) => unknown> = {
+  [OID.INT8]: asNumber,
+  [OID.NUMERIC]: asNumber,
+  [OID.DATE]: asString,
+  [OID.TIMESTAMP]: asString,
+  [OID.TIMESTAMPTZ]: asString,
+};
+
+/* ------------------------------------------------------------- connection */
+
 declare global {
-  var __founderyDb: Database.Database | undefined;
+  var __founderyDb: Promise<Db> | undefined;
 }
 
-function resolveDbPath(): string {
-  const configured = process.env.FOUNDERY_DB_PATH || "data/foundery.db";
-  // The path is configurable at runtime, which the bundler's static analysis
-  // reads as "could be anything" and answers by tracing the entire project —
-  // public folder and all — into the server output. It is only ever a local
-  // SQLite file, so opt out of the trace.
-  return path.isAbsolute(configured)
-    ? configured
-    : path.join(/*turbopackIgnore: true*/ process.cwd(), configured);
+export function databaseUrl(): string | undefined {
+  // Vercel's Supabase integration sets POSTGRES_URL; the Supabase dashboard
+  // calls it DATABASE_URL. Accept either so neither has to be renamed.
+  return process.env.DATABASE_URL || process.env.POSTGRES_URL || undefined;
 }
 
-function open(): Database.Database {
-  const file = resolveDbPath();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
-  return db;
+export function usingPostgresServer(): boolean {
+  return Boolean(databaseUrl());
 }
 
-export function getDb(): Database.Database {
-  if (!globalThis.__founderyDb) globalThis.__founderyDb = open();
+async function openPostgres(url: string): Promise<Db> {
+  const { Pool, types } = await import("pg");
+
+  for (const [oid, parser] of Object.entries(TYPE_PARSERS)) {
+    types.setTypeParser(Number(oid), parser as (value: string) => string);
+  }
+
+  const pool = new Pool({
+    connectionString: url,
+    // Serverless: many short-lived instances, each wanting very few
+    // connections. Supabase's transaction pooler multiplexes the rest.
+    max: Number(process.env.FOUNDERY_DB_POOL_MAX || 3),
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+    ssl: sslOptions(url),
+  });
+
+  return {
+    async query<T>(text: string, params: unknown[] = []) {
+      const result = await pool.query(text, params as unknown[]);
+      return result.rows as T[];
+    },
+    async exec(sql: string) {
+      await pool.query(sql);
+    },
+  };
+}
+
+/**
+ * Supabase terminates TLS with its own CA. Paste that certificate into
+ * FOUNDERY_DB_CA_CERT and the chain is verified properly. Without it the
+ * connection is still encrypted but the certificate isn't checked — which is
+ * what `sslmode=require` means and what Supabase's own quickstarts use. Set
+ * the certificate for anything you care about.
+ */
+function sslOptions(url: string): false | { ca?: string; rejectUnauthorized: boolean } {
+  if (url.includes("sslmode=disable")) return false;
+  const ca = process.env.FOUNDERY_DB_CA_CERT;
+  if (ca) return { ca, rejectUnauthorized: true };
+  return { rejectUnauthorized: false };
+}
+
+async function openPglite(): Promise<Db> {
+  const dir = process.env.FOUNDERY_PGLITE_DIR || path.join(process.cwd(), ".pglite");
+
+  let PGlite: typeof import("@electric-sql/pglite").PGlite;
+  try {
+    ({ PGlite } = await import("@electric-sql/pglite"));
+  } catch {
+    // PGlite is a devDependency: it is the local convenience, not the product.
+    // Reaching here in a deployed environment means DATABASE_URL never made it
+    // into the environment, which is worth saying plainly.
+    throw new Error(
+      "No DATABASE_URL is set and PGlite isn't installed. Set DATABASE_URL to your " +
+        "Supabase transaction-pooler connection string (see .env.example), or install " +
+        "dev dependencies to use the local database.",
+    );
+  }
+
+  const pg = new PGlite(dir === ":memory:" ? undefined : dir, { parsers: TYPE_PARSERS });
+  await pg.waitReady;
+
+  // Local backend, single process, no cold-start race: applying the schema on
+  // open is the whole setup step. A server-backed database gets it from
+  // `npm run db:setup` instead.
+  await pg.exec(readSchema());
+
+  return {
+    async query<T>(text: string, params: unknown[] = []) {
+      const result = await pg.query(text, params as unknown[]);
+      return result.rows as T[];
+    },
+    async exec(sql: string) {
+      await pg.exec(sql);
+    },
+  };
+}
+
+export function readSchema(): string {
+  return fs.readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8");
+}
+
+/**
+ * One connection per process, cached on globalThis so Next's dev-mode module
+ * reloading doesn't open a new pool on every request.
+ */
+export function getDb(): Promise<Db> {
+  if (!globalThis.__founderyDb) {
+    const url = databaseUrl();
+    globalThis.__founderyDb = url ? openPostgres(url) : openPglite();
+  }
   return globalThis.__founderyDb;
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS clients (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  name           TEXT NOT NULL,
-  slug           TEXT NOT NULL UNIQUE,
-  status         TEXT NOT NULL DEFAULT 'active',      -- active | paused | churned
-  engagement     TEXT NOT NULL DEFAULT 'retainer',    -- retainer | one_time
-  vip            INTEGER NOT NULL DEFAULT 0,
-  services       TEXT NOT NULL DEFAULT '[]',          -- JSON array of service tags
-  retainer_amount   REAL NOT NULL DEFAULT 0,          -- per month, founder-only
-  one_time_value    REAL NOT NULL DEFAULT 0,          -- total contract, founder-only
-  delivery_cost     REAL NOT NULL DEFAULT 0,          -- monthly cost to serve, founder-only
-  currency       TEXT NOT NULL DEFAULT 'INR',
-  start_date     TEXT,
-  end_date       TEXT,
-  billing_day    INTEGER NOT NULL DEFAULT 1,          -- day of month the invoice is raised
-  terms_days     INTEGER NOT NULL DEFAULT 15,         -- net-N payment terms
-  owner          TEXT,                                -- internal account owner
-  health         TEXT NOT NULL DEFAULT 'green',       -- green | amber | red (founder-only)
-  notes          TEXT,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
+/* ----------------------------------------------------------- named params */
 
-CREATE TABLE IF NOT EXISTS costs (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  category     TEXT NOT NULL,                         -- salary | tools | contractor | charity | marketing | other
-  label        TEXT NOT NULL,                         -- what it is (role, tool name, campaign)
-  person       TEXT,                                  -- named individual, if any (redacted from operator on salary)
-  amount       REAL NOT NULL DEFAULT 0,
-  cadence      TEXT NOT NULL DEFAULT 'monthly',       -- monthly | annual | one_time
-  currency     TEXT NOT NULL DEFAULT 'INR',
-  start_date   TEXT,
-  end_date     TEXT,
-  active       INTEGER NOT NULL DEFAULT 1,
-  client_id    INTEGER REFERENCES clients(id) ON DELETE SET NULL,
-  notes        TEXT,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
+/**
+ * Turns `@name` placeholders into `$1, $2, …` and lines the values up.
+ *
+ * Postgres only takes positional parameters, and hand-numbering a sixteen
+ * column INSERT is exactly the kind of thing that silently writes the notes
+ * into the currency field. Naming them keeps the statement readable and the
+ * mapping impossible to get wrong.
+ */
+export function named(text: string, params: Record<string, unknown>): [string, unknown[]] {
+  const values: unknown[] = [];
+  const positions = new Map<string, number>();
 
-CREATE TABLE IF NOT EXISTS invoices (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id    INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  number       TEXT NOT NULL UNIQUE,
-  period       TEXT,                                  -- e.g. '2026-08' or 'Phase 1'
-  issue_date   TEXT NOT NULL,
-  due_date     TEXT NOT NULL,
-  terms_days   INTEGER NOT NULL DEFAULT 15,
-  amount       REAL NOT NULL DEFAULT 0,
-  amount_paid  REAL NOT NULL DEFAULT 0,
-  currency     TEXT NOT NULL DEFAULT 'INR',
-  status       TEXT NOT NULL DEFAULT 'draft',         -- draft | sent | part_paid | paid | void
-  paid_date    TEXT,
-  notes        TEXT,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_due    ON invoices(due_date);
+  const compiled = text.replace(/@([a-zA-Z_][a-zA-Z0-9_]*)/g, (_match, key: string) => {
+    if (!(key in params)) throw new Error(`Missing bind parameter: @${key}`);
+    let position = positions.get(key);
+    if (position === undefined) {
+      values.push(params[key]);
+      position = values.length;
+      positions.set(key, position);
+    }
+    return `$${position}`;
+  });
 
-CREATE TABLE IF NOT EXISTS onboarding_forms (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  title        TEXT NOT NULL,
-  intro        TEXT,
-  token        TEXT NOT NULL UNIQUE,                  -- public URL segment
-  client_id    INTEGER REFERENCES clients(id) ON DELETE SET NULL,
-  fields       TEXT NOT NULL DEFAULT '[]',            -- JSON array of field defs
-  status       TEXT NOT NULL DEFAULT 'open',          -- open | closed
-  created_by   TEXT NOT NULL DEFAULT 'founder',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS onboarding_submissions (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  form_id      INTEGER NOT NULL REFERENCES onboarding_forms(id) ON DELETE CASCADE,
-  answers      TEXT NOT NULL DEFAULT '{}',            -- JSON object keyed by field key
-  submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_submissions_form ON onboarding_submissions(form_id);
-
--- Money that actually landed / non-invoice income, per calendar month. Founder-only.
-CREATE TABLE IF NOT EXISTS pnl_months (
-  month          TEXT PRIMARY KEY,                    -- 'YYYY-MM'
-  other_income   REAL NOT NULL DEFAULT 0,
-  one_off_costs  REAL NOT NULL DEFAULT 0,
-  tax_rate       REAL NOT NULL DEFAULT 0,             -- 0..1, applied to profit before tax
-  notes          TEXT,
-  closed         INTEGER NOT NULL DEFAULT 0,          -- month locked as final
-  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts         TEXT NOT NULL DEFAULT (datetime('now')),
-  actor      TEXT NOT NULL,                           -- founder | operator | public
-  action     TEXT NOT NULL,
-  entity     TEXT,
-  entity_id  TEXT,
-  detail     TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
-`;
-
-function migrate(db: Database.Database) {
-  db.exec(SCHEMA);
+  return [compiled, values];
 }
 
-export function logAudit(
+/* -------------------------------------------------------------- utilities */
+
+export async function logAudit(
   actor: string,
   action: string,
   entity?: string,
-  entityId?: string | number | bigint,
+  entityId?: string | number,
   detail?: string,
 ) {
-  getDb()
-    .prepare(
-      `INSERT INTO audit_log (actor, action, entity, entity_id, detail)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(actor, action, entity ?? null, entityId?.toString() ?? null, detail ?? null);
+  const db = await getDb();
+  await db.query(
+    `INSERT INTO foundery.audit_log (actor, action, entity, entity_id, detail)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [actor, action, entity ?? null, entityId?.toString() ?? null, detail ?? null],
+  );
 }
 
-export function getSetting(key: string, fallback: string): string {
-  const row = getDb()
-    .prepare(`SELECT value FROM settings WHERE key = ?`)
-    .get(key) as { value: string } | undefined;
-  return row?.value ?? fallback;
+export async function getSetting(key: string, fallback: string): Promise<string> {
+  const db = await getDb();
+  const rows = await db.query<{ value: string }>(
+    `SELECT value FROM foundery.settings WHERE key = $1`,
+    [key],
+  );
+  return rows[0]?.value ?? fallback;
 }
 
-export function setSetting(key: string, value: string) {
-  getDb()
-    .prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    )
-    .run(key, value);
+export async function setSetting(key: string, value: string) {
+  const db = await getDb();
+  await db.query(
+    `INSERT INTO foundery.settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [key, value],
+  );
+}
+
+/** Every setting in one round trip, for code that needs several at once. */
+export async function getSettings(): Promise<Map<string, string>> {
+  const db = await getDb();
+  const rows = await db.query<{ key: string; value: string }>(
+    `SELECT key, value FROM foundery.settings`,
+  );
+  return new Map(rows.map((row) => [row.key, row.value]));
 }

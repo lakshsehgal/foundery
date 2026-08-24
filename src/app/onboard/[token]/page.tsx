@@ -18,7 +18,7 @@ export default async function PublicOnboardingPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const form = getFormByToken(token);
+  const form = await getFormByToken(token);
   if (!form) notFound();
 
   return (

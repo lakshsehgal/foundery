@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPage() {
   await requireRole();
 
-  const forms = listForms();
+  const [forms, clients] = await Promise.all([listForms(), clientOptions()]);
   const urls = Object.fromEntries(forms.map((form) => [form.id, publicFormUrl(form.token)]));
   const replies = forms.reduce((sum, form) => sum + form.submissions, 0);
 
@@ -27,7 +27,7 @@ export default async function OnboardingPage() {
         <OnboardingView
           forms={forms}
           urls={urls}
-          clients={clientOptions().map((client) => ({ id: client.id, name: client.name }))}
+          clients={clients.map((client) => ({ id: client.id, name: client.name }))}
           starterFields={defaultFields()}
         />
       </PageBody>

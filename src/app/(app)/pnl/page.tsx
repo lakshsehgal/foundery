@@ -25,7 +25,7 @@ export default async function PnlPage({
   const currency = defaultCurrency();
   const symbol = symbolFor(currency);
 
-  const months = pnl(12, basis);
+  const months = await pnl(12, basis);
   const totals = pnlTotals(months);
   const current = monthKey();
   const withData = months.filter((month) => month.hasData);

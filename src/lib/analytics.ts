@@ -28,18 +28,17 @@ export type ClientEconomics = {
   shareOfRevenuePct: number;
 };
 
-export function clientEconomics(): ClientEconomics[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT id, name, vip, engagement, health, retainer_amount, one_time_value,
-              delivery_cost, start_date, end_date
-       FROM clients WHERE status = 'active'`,
-    )
-    .all() as {
-      id: number; name: string; vip: number; engagement: string; health: string;
-      retainer_amount: number; one_time_value: number; delivery_cost: number;
-      start_date: string | null; end_date: string | null;
-    }[];
+export async function clientEconomics(): Promise<ClientEconomics[]> {
+  const db = await getDb();
+  const rows = await db.query<{
+    id: number; name: string; vip: boolean; engagement: string; health: string;
+    retainer_amount: number; one_time_value: number; delivery_cost: number;
+    start_date: string | null; end_date: string | null;
+  }>(
+    `SELECT id, name, vip, engagement, health, retainer_amount, one_time_value,
+            delivery_cost, start_date, end_date
+     FROM foundery.clients WHERE status = 'active'`,
+  );
 
   const priced = rows.map((row) => {
     const mrr =
@@ -50,7 +49,7 @@ export function clientEconomics(): ClientEconomics[] {
     return {
       id: row.id,
       name: row.name,
-      vip: row.vip === 1,
+      vip: row.vip,
       engagement: row.engagement,
       health: row.health as Health,
       mrr,
@@ -84,13 +83,15 @@ export type Headline = {
   cashBuffer: number | null;
 };
 
-export function headline(): Headline {
-  const economics = clientEconomics();
+export async function headline(): Promise<Headline> {
+  const [economics, burn, bufferRaw] = await Promise.all([
+    clientEconomics(),
+    monthlyBurn(),
+    getSetting("cash_buffer", ""),
+  ]);
   const mrr = economics.reduce((sum, c) => sum + c.mrr, 0);
   const deliveryCost = economics.reduce((sum, c) => sum + c.deliveryCost, 0);
-  const burn = monthlyBurn();
   const netProfit = mrr - burn;
-  const bufferRaw = getSetting("cash_buffer", "");
   const cashBuffer = bufferRaw === "" ? null : Number(bufferRaw);
 
   return {
@@ -126,18 +127,17 @@ export type ProjectedMonth = {
  * ships. Anything past a client's end date simply isn't there, which is the
  * point: the shape of the curve shows the cliff before it arrives.
  */
-export function projection(months = 6): ProjectedMonth[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT engagement, retainer_amount, one_time_value, start_date, end_date
-       FROM clients WHERE status IN ('active','paused')`,
-    )
-    .all() as {
-      engagement: string; retainer_amount: number; one_time_value: number;
-      start_date: string | null; end_date: string | null;
-    }[];
+export async function projection(months = 6): Promise<ProjectedMonth[]> {
+  const db = await getDb();
+  const rows = await db.query<{
+    engagement: string; retainer_amount: number; one_time_value: number;
+    start_date: string | null; end_date: string | null;
+  }>(
+    `SELECT engagement, retainer_amount, one_time_value, start_date, end_date
+     FROM foundery.clients WHERE status IN ('active','paused')`,
+  );
 
-  const burn = monthlyBurn();
+  const burn = await monthlyBurn();
   const start = new Date();
   const out: ProjectedMonth[] = [];
 
@@ -193,9 +193,10 @@ const SEVERITY_WEIGHT = { good: 0, warning: 8, serious: 18, critical: 30 };
  * scored on its own and the report is the sum, capped — one critical finding
  * shouldn't be averaged away by four calm ones.
  */
-export function riskReport(today = todayISO()): RiskReport {
+export async function riskReport(today = todayISO()): Promise<RiskReport> {
   const findings: RiskFinding[] = [];
-  const economics = clientEconomics();
+  const db = await getDb();
+  const economics = await clientEconomics();
   const totalMrr = economics.reduce((sum, c) => sum + c.mrr, 0);
 
   // 1 — Revenue concentration.
@@ -229,24 +230,28 @@ export function riskReport(today = todayISO()): RiskReport {
   }
 
   // 2 — Money owed and late.
-  const receivables = getDb()
-    .prepare(
-      `SELECT COALESCE(SUM(amount - amount_paid), 0) AS outstanding,
-              COALESCE(SUM(CASE WHEN due_date < ? THEN amount - amount_paid ELSE 0 END), 0) AS overdue,
-              COUNT(CASE WHEN due_date < ? AND status NOT IN ('paid','void') THEN 1 END) AS overdueCount
-       FROM invoices WHERE status NOT IN ('paid','void')`,
-    )
-    .get(today, today) as { outstanding: number; overdue: number; overdueCount: number };
+  const [receivables] = await db.query<{
+    outstanding: number; overdue: number; overduecount: number;
+  }>(
+    `SELECT COALESCE(SUM(amount - amount_paid), 0) AS outstanding,
+            COALESCE(SUM(CASE WHEN due_date < $1 THEN amount - amount_paid ELSE 0 END), 0) AS overdue,
+            COUNT(CASE WHEN due_date < $1 AND status NOT IN ('paid','void') THEN 1 END) AS overdueCount
+     FROM foundery.invoices WHERE status NOT IN ('paid','void')`,
+    [today],
+  );
 
-  const burn = monthlyBurn();
+  // Postgres folds unquoted identifiers to lower case, so overdueCount comes
+  // back as overduecount.
+  const overdueCount = Number(receivables.overduecount);
+  const burn = await monthlyBurn();
   const overdueMonths = burn > 0 ? receivables.overdue / burn : 0;
   const receivableSeverity =
     overdueMonths >= 1 ? "critical" : overdueMonths >= 0.5 ? "serious" : receivables.overdue > 0 ? "warning" : "good";
   findings.push({
     key: "receivables",
     title:
-      receivables.overdueCount > 0
-        ? `${receivables.overdueCount} invoice${receivables.overdueCount === 1 ? "" : "s"} past due`
+      overdueCount > 0
+        ? `${overdueCount} invoice${overdueCount === 1 ? "" : "s"} past due`
         : "Nothing overdue",
     detail:
       receivables.overdue > 0
@@ -258,7 +263,7 @@ export function riskReport(today = todayISO()): RiskReport {
   });
 
   // 3 — Margin.
-  const head = headline();
+  const head = await headline();
   const marginSeverity =
     head.netMarginPct === null
       ? "warning"
@@ -290,7 +295,7 @@ export function riskReport(today = todayISO()): RiskReport {
   });
 
   // 4 — Fixed-cost load. Salaries can't be switched off in a bad month.
-  const totals = costTotals();
+  const totals = await costTotals();
   const fixed = totals
     .filter((t) => (["salary", "other"] as CostCategory[]).includes(t.category))
     .reduce((sum, t) => sum + t.total, 0);
@@ -365,38 +370,50 @@ export type PnlMonth = {
   hasData: boolean;
 };
 
-export function pnl(months = 12, basis: "invoiced" | "collected" = "invoiced"): PnlMonth[] {
+export async function pnl(
+  months = 12,
+  basis: "invoiced" | "collected" = "invoiced",
+): Promise<PnlMonth[]> {
   const keys = lastMonths(months);
-  const db = getDb();
+  const db = await getDb();
 
-  return keys.map((month) => {
-    const invoiced = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(amount), 0) AS total FROM invoices
-           WHERE status != 'void' AND substr(issue_date, 1, 7) = ?`,
-        )
-        .get(month) as { total: number }
-    ).total;
+  // Both revenue sides and every manual row in three queries rather than
+  // three per month — a serverless round trip to Supabase is not free.
+  const [invoicedRows, collectedRows, manualRows] = await Promise.all([
+    db.query<{ month: string; total: number }>(
+      `SELECT to_char(issue_date, 'YYYY-MM') AS month, COALESCE(SUM(amount), 0) AS total
+       FROM foundery.invoices
+       WHERE status <> 'void' AND to_char(issue_date, 'YYYY-MM') = ANY($1)
+       GROUP BY 1`,
+      [keys],
+    ),
+    db.query<{ month: string; total: number }>(
+      `SELECT to_char(paid_date, 'YYYY-MM') AS month, COALESCE(SUM(amount_paid), 0) AS total
+       FROM foundery.invoices
+       WHERE status <> 'void' AND paid_date IS NOT NULL
+         AND to_char(paid_date, 'YYYY-MM') = ANY($1)
+       GROUP BY 1`,
+      [keys],
+    ),
+    db.query<{
+      month: string; other_income: number; one_off_costs: number;
+      tax_rate: number; notes: string | null; closed: boolean;
+    }>(`SELECT * FROM foundery.pnl_months WHERE month = ANY($1)`, [keys]),
+  ]);
 
-    const collected = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(amount_paid), 0) AS total FROM invoices
-           WHERE status != 'void' AND paid_date IS NOT NULL AND substr(paid_date, 1, 7) = ?`,
-        )
-        .get(month) as { total: number }
-    ).total;
+  const invoicedBy = new Map(invoicedRows.map((row) => [row.month, Number(row.total)]));
+  const collectedBy = new Map(collectedRows.map((row) => [row.month, Number(row.total)]));
+  const manualBy = new Map(manualRows.map((row) => [row.month, row]));
+  const monthCosts = await Promise.all(keys.map((month) => costsForMonth(month)));
 
-    const manual = db
-      .prepare(`SELECT * FROM pnl_months WHERE month = ?`)
-      .get(month) as
-      | { other_income: number; one_off_costs: number; tax_rate: number; notes: string | null; closed: number }
-      | undefined;
+  return keys.map((month, index) => {
+    const invoiced = invoicedBy.get(month) ?? 0;
+    const collected = collectedBy.get(month) ?? 0;
+    const manual = manualBy.get(month);
 
     const otherIncome = manual?.other_income ?? 0;
     const oneOffCosts = manual?.one_off_costs ?? 0;
-    const costs = costsForMonth(month) + oneOffCosts;
+    const costs = monthCosts[index] + oneOffCosts;
     const revenue = (basis === "invoiced" ? invoiced : collected) + otherIncome;
     const profitBeforeTax = revenue - costs;
     const taxRate = manual?.tax_rate ?? 0;
@@ -416,7 +433,7 @@ export function pnl(months = 12, basis: "invoiced" | "collected" = "invoiced"): 
       taxRatePct: taxRate * 100,
       profit: profitBeforeTax - tax,
       marginPct: revenue > 0 ? ((profitBeforeTax - tax) / revenue) * 100 : null,
-      closed: manual?.closed === 1,
+      closed: manual?.closed === true,
       notes: manual?.notes ?? null,
       hasData: invoiced > 0 || collected > 0 || costs > 0 || otherIncome > 0,
     };

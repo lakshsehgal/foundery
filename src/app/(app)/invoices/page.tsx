@@ -12,12 +12,16 @@ export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
   const role = await requireRole();
-  const policy = policyFor(role);
   const currency = defaultCurrency();
   const today = todayISO();
 
-  const invoices = listInvoices(role, today);
-  const feed = reminders(role, today);
+  const [policy, invoices, feed, clients, suggestedNumber] = await Promise.all([
+    policyFor(role),
+    listInvoices(role, today),
+    reminders(role, today),
+    clientOptions(),
+    nextInvoiceNumber(),
+  ]);
 
   const rows: InvoiceRowDisplay[] = invoices.map((invoice) => ({
     ...invoice,
@@ -83,11 +87,11 @@ export default async function InvoicesPage() {
 
         <InvoicesView
           invoices={rows}
-          clients={clientOptions().map((c) => ({ id: c.id, name: c.name, terms_days: c.terms_days }))}
+          clients={clients.map((c) => ({ id: c.id, name: c.name, terms_days: c.terms_days }))}
           canEditAmounts={role === "founder"}
           canDelete={role === "founder"}
           currencySymbol={symbolFor(currency)}
-          suggestedNumber={nextInvoiceNumber()}
+          suggestedNumber={suggestedNumber}
           today={today}
         />
       </PageBody>

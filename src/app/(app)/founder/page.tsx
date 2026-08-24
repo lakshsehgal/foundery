@@ -45,11 +45,13 @@ export default async function FounderPage() {
   await requireFounder();
 
   const currency = defaultCurrency();
-  const head = headline();
-  const economics = clientEconomics();
-  const forecast = projection(6);
-  const risk = riskReport();
-  const totals = costTotals();
+  const [head, economics, forecast, risk, totals] = await Promise.all([
+    headline(),
+    clientEconomics(),
+    projection(6),
+    riskReport(),
+    costTotals(),
+  ]);
   const burn = totals.reduce((sum, row) => sum + row.total, 0);
   const band = BAND_COPY[risk.band];
   const BandIcon = band.icon;

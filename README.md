@@ -6,7 +6,7 @@ founder sees the money.
 
 <!-- Screens: Today · Clients · Costs · Invoices · Onboarding · Founder · P&L -->
 
-## Running it
+## Running it locally
 
 ```bash
 npm install
@@ -14,6 +14,11 @@ cp .env.example .env      # then edit it — see below
 npm run seed              # optional: fills the database with a sample agency
 npm run dev               # http://localhost:3000
 ```
+
+No database to install. With `DATABASE_URL` empty, Foundery runs on **PGlite** —
+Postgres compiled to WASM — against a local `.pglite/` directory. It is the same
+engine and the same SQL that runs on Supabase, so local development and the test
+suite exercise the real thing rather than a stand-in.
 
 `.env` is the whole configuration. Nothing in it is stored in the database, so
 nobody can read the passcodes back out of the running app:
@@ -23,7 +28,8 @@ nobody can read the passcodes back out of the running app:
 | `FOUNDERY_FOUNDER_PASSCODE` | Signs you in as the founder. Sees everything. |
 | `FOUNDERY_OPERATOR_PASSCODE` | Signs you in as the operator. The day-to-day view. |
 | `FOUNDERY_SESSION_SECRET` | Signs session cookies. Change it and everyone is signed out. |
-| `FOUNDERY_DB_PATH` | Where the SQLite file lives. Defaults to `data/foundery.db`. |
+| `DATABASE_URL` | Supabase connection string. Empty = local PGlite. |
+| `FOUNDERY_DB_CA_CERT` | Optional: Supabase's CA certificate, to verify TLS properly. |
 | `FOUNDERY_PUBLIC_URL` | Base for the shareable onboarding links. |
 | `FOUNDERY_CURRENCY` | `INR` (default), `USD`, `GBP`, `EUR` or `AED`. |
 
@@ -34,20 +40,27 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 **Before this leaves your machine:** change both passcodes and the session
-secret, and serve it over HTTPS — session cookies are only marked `secure` in
-production, and a passcode over plain HTTP is a passcode in the open.
+secret. Session cookies are only marked `secure` in production, and a passcode
+over plain HTTP is a passcode in the open.
 
 ### The rest of the commands
 
 ```bash
 npm run build      # production build
 npm start          # serve the build
-npm test           # the redaction, money and session suites
+npm test           # redaction, money and session suites, on real Postgres
 npm run typecheck  # tsc, no emit
+npm run lint       # eslint
+npm run db:setup   # apply db/schema.sql to whatever DATABASE_URL points at
 npm run seed       # seed if the database is empty
 npm run seed -- --force   # wipe and re-seed
-npm run reset      # delete the database file and seed from scratch
+npm run reset      # delete the local database and seed from scratch
 ```
+
+One caveat on the local backend: **PGlite is single-process.** The dev server
+holds `.pglite/`, so a second process (a seed script, a psql-style query) can't
+open it at the same time. Stop the dev server first. Supabase has no such
+limitation.
 
 ## Who sees what
 
@@ -87,6 +100,8 @@ readable on Settings.
 ## How it fits together
 
 ```
+db/schema.sql     the whole database, idempotent. Run it with `npm run db:setup`.
+
 src/lib/          the part worth reading first
   session.ts      passcodes → signed role token, and back. No framework imports,
                   so the security core is testable on its own.
@@ -97,7 +112,8 @@ src/lib/          the part worth reading first
   analytics.ts    founder-only maths: margins, projection, risk, P&L
   economics.ts    how a contract becomes a monthly number — shared by the
                   clients table and the founder dashboard so they agree
-  db.ts           SQLite, schema, migrations, audit log
+  db.ts           Postgres (`pg`) or PGlite behind one interface, plus the
+                  type parsers, the `@name` bind helper and the audit log
   taxonomy.ts     the vocabulary of the business, and the fixed colour per
                   cost category
 
@@ -110,6 +126,15 @@ src/components/ui/   the Neuroid UI kit primitives (docs/NEUROID-UI-KIT.md)
 ```
 
 ### Some decisions worth knowing about
+
+**Dates are calendar days, and stay that way.** `date` columns come back from
+both drivers as plain `YYYY-MM-DD` strings rather than `Date` objects. A due
+date that shifts by a day because the function ran in a different timezone is
+the kind of bug that quietly corrupts a P&L, and this closes the door on it.
+
+**Money is `numeric(14,2)`, parsed to a JavaScript number.** Postgres hands
+`numeric` back as a string to protect precision; the largest realistic figure
+here is a few crore, which a double holds exactly to the paisa.
 
 **A project is spread across the months it runs.** A ₹3L build over three
 months shows as ₹1L a month next to a ₹1L retainer, with the contract total in
@@ -144,18 +169,79 @@ The public endpoint accepts nothing but answers to the questions that form
 actually declares — unknown keys are dropped rather than stored, answers are
 length-capped, and a hidden honeypot field silently swallows bots.
 
-## Deploying
+## Deploying to Vercel + Supabase
 
-SQLite means one writer and a real filesystem, so Foundery wants a small
-persistent box — a VPS, a Fly volume, a Pi in the office — not a serverless
-platform with an ephemeral disk. Put it behind HTTPS, keep `data/` on a disk
-that gets backed up, and that is the whole operation.
-
-Back up by copying the database file:
+**1. Create the Supabase project**, then apply the schema. Either paste
+`db/schema.sql` into the Supabase SQL editor, or run it from here:
 
 ```bash
-sqlite3 data/foundery.db ".backup 'backup-$(date +%F).db'"
+DATABASE_URL="postgresql://..." npm run db:setup
 ```
+
+Both are safe to re-run — the file is idempotent.
+
+**2. Get the right connection string.** In Supabase: *Connect → Transaction
+pooler*, port **6543**. This matters. Serverless functions open many
+short-lived connections; the transaction pooler is built for exactly that,
+while the direct connection on 5432 will run out of slots under any real load.
+
+**3. Set the environment variables** in Vercel (Project → Settings →
+Environment Variables):
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | The transaction-pooler string, port 6543 |
+| `FOUNDERY_FOUNDER_PASSCODE` | Your passcode |
+| `FOUNDERY_OPERATOR_PASSCODE` | Your operator's passcode |
+| `FOUNDERY_SESSION_SECRET` | 32 random bytes, generated as above |
+| `FOUNDERY_CURRENCY` | `INR` |
+| `FOUNDERY_PUBLIC_URL` | Your domain, e.g. `https://foundery.neuroidmedia.com` |
+
+`FOUNDERY_PUBLIC_URL` only affects the onboarding links you copy out of the
+app; left unset, it falls back to the Vercel production domain.
+
+**4. Deploy.** No `vercel.json` is needed — the build is a standard Next.js
+build and touches no database, because every page is `force-dynamic`.
+
+**5. Seed it, if you want the sample data to look at first:**
+
+```bash
+DATABASE_URL="postgresql://..." npm run seed
+```
+
+Then delete the sample clients and put your own in.
+
+### Put the functions next to the database
+
+Vercel defaults to `iad1` (Washington DC). If your Supabase project is in
+Mumbai, every single query crosses the Atlantic and back — on a page that runs
+five queries, that is most of the page load. Set the function region to match
+your Supabase region under **Project → Settings → Functions**. For a Mumbai
+Supabase, that is `bom1`.
+
+### Backups
+
+Supabase takes daily backups on paid plans. On the free plan, take your own:
+
+```bash
+pg_dump "$DATABASE_URL" --schema=foundery --no-owner -f "foundery-$(date +%F).sql"
+```
+
+### A note on Supabase's REST API
+
+Supabase auto-generates a public REST API over the `public` schema, reachable
+with the anon key. Foundery's tables hold salaries and client revenue, so they
+live in a **`foundery` schema instead** — PostgREST never sees them. Row level
+security is switched on underneath as a second lock, and the app connects as
+the owner role, which bypasses RLS by design. Don't move these tables into
+`public`.
+
+### TLS
+
+Without `FOUNDERY_DB_CA_CERT`, the database connection is encrypted but the
+certificate chain isn't verified — that is what `sslmode=require` means, and
+what Supabase's own quickstarts use. To verify properly, copy the certificate
+from *Supabase → Settings → Database → SSL configuration* into that variable.
 
 ## Branding
 

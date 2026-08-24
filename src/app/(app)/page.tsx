@@ -21,14 +21,19 @@ const KIND_STYLE = {
 
 export default async function TodayPage() {
   const role = await requireRole();
-  const policy = policyFor(role);
   const today = todayISO();
 
-  const feed = reminders(role, today);
-  const clients = listClients(role);
+  const [policy, feed, clients, burn, totals, submissions] = await Promise.all([
+    policyFor(role),
+    reminders(role, today),
+    listClients(role),
+    monthlyBurn(),
+    costTotals(),
+    listSubmissions(),
+  ]);
+
   const active = clients.filter((c) => c.status === "active");
-  const burn = monthlyBurn();
-  const recentSubmissions = listSubmissions().slice(0, 4);
+  const recentSubmissions = submissions.slice(0, 4);
   const overdueCount = feed.filter((r) => r.kind === "overdue").length;
 
   return (
@@ -59,7 +64,7 @@ export default async function TodayPage() {
           <StatTile
             label="Monthly cost base"
             value={fmtCompact(burn)}
-            hint={`Across ${costTotals().filter((c) => c.count > 0).length} categories`}
+            hint={`Across ${totals.filter((c) => c.count > 0).length} categories`}
           />
           <StatTile
             label="Needs chasing"

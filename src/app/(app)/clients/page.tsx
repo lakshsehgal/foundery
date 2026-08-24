@@ -12,8 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   const role = await requireRole();
-  const policy = policyFor(role);
-  const clients = listClients(role);
+  const [policy, clients] = await Promise.all([policyFor(role), listClients(role)]);
   const currency = defaultCurrency();
 
   // Money is formatted and margins are worked out here, on the server: the

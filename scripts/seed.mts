@@ -3,31 +3,36 @@
  * something to show on first run. Safe to re-run: it only writes when the
  * clients table is empty, unless you pass --force.
  *
- *   npm run seed          seed if empty
+ *   npm run seed              seed if empty
  *   npm run seed -- --force   wipe and re-seed
- *   npm run reset         delete the file and seed from scratch
+ *   npm run db:setup          apply the schema (needed once per Postgres db)
  */
 import crypto from "node:crypto";
-import { getDb, setSetting } from "../src/lib/db";
+import { getDb, named, setSetting, usingPostgresServer } from "../src/lib/db";
 import { addDays, billingDateFor, monthKey, todayISO } from "../src/lib/dates";
-import { DEFAULT_ONBOARDING_FIELDS } from "../src/lib/taxonomy";
+import { defaultFields } from "../src/lib/taxonomy";
 
 const force = process.argv.includes("--force");
-const db = getDb();
 
-const existing = db.prepare(`SELECT COUNT(*) AS n FROM clients`).get() as { n: number };
-if (existing.n > 0 && !force) {
-  console.log(`Database already has ${existing.n} clients — nothing to do. Use --force to replace them.`);
+const db = await getDb();
+
+const [{ count }] = await db.query<{ count: number }>(
+  `SELECT COUNT(*)::int AS count FROM foundery.clients`,
+);
+if (count > 0 && !force) {
+  console.log(`Database already has ${count} clients — nothing to do. Use --force to replace them.`);
   process.exit(0);
 }
 
 if (force) {
-  for (const table of [
-    "onboarding_submissions", "onboarding_forms", "invoices", "costs",
-    "clients", "pnl_months", "audit_log",
-  ]) {
-    db.prepare(`DELETE FROM ${table}`).run();
-  }
+  // TRUNCATE ... CASCADE also resets the identity sequences, so a re-seed
+  // gives the same ids every time and invoice numbers stay predictable.
+  await db.exec(`
+    TRUNCATE foundery.onboarding_submissions, foundery.onboarding_forms,
+             foundery.invoices, foundery.costs, foundery.clients,
+             foundery.pnl_months, foundery.audit_log
+    RESTART IDENTITY CASCADE;
+  `);
 }
 
 const today = todayISO();
@@ -40,51 +45,57 @@ function monthsAgo(n: number): string {
 
 /* ------------------------------------------------------------------ clients */
 
-const clients = [
+type SeedClient = {
+  name: string; engagement: string; vip: boolean; status: string; services: string[];
+  retainer?: number; oneTime?: number; delivery: number; health: string; owner: string;
+  start: string; end?: string; billing: number; terms: number; notes: string;
+};
+
+const clients: SeedClient[] = [
   {
-    name: "Kidology", engagement: "retainer", vip: 1, status: "active",
+    name: "Kidology", engagement: "retainer", vip: true, status: "active",
     services: ["Performance marketing", "Performance creatives", "UGC"],
     retainer: 185000, delivery: 82000, health: "green", owner: "Laksh",
     start: monthsAgo(9) + "-01", billing: 1, terms: 15,
     notes: "Kids' apparel D2C. Scaling Meta, TikTok next quarter.",
   },
   {
-    name: "UniSeoul", engagement: "retainer", vip: 1, status: "active",
+    name: "UniSeoul", engagement: "retainer", vip: true, status: "active",
     services: ["Performance marketing", "AI ads", "Social media"],
     retainer: 225000, delivery: 96000, health: "green", owner: "Laksh",
     start: monthsAgo(6) + "-15", billing: 5, terms: 15,
     notes: "K-beauty importer. Biggest account, biggest concentration risk.",
   },
   {
-    name: "Wellness Shop", engagement: "retainer", vip: 0, status: "active",
+    name: "Wellness Shop", engagement: "retainer", vip: false, status: "active",
     services: ["Performance marketing", "Email & retention"],
     retainer: 120000, delivery: 71000, health: "amber", owner: "Priya",
     start: monthsAgo(4) + "-01", billing: 1, terms: 30,
     notes: "Margin is thin and they pay late. Repricing conversation booked.",
   },
   {
-    name: "Halcyon Coffee", engagement: "retainer", vip: 0, status: "active",
+    name: "Halcyon Coffee", engagement: "retainer", vip: false, status: "active",
     services: ["Social media", "Performance creatives"],
     retainer: 85000, delivery: 38000, health: "green", owner: "Priya",
     start: monthsAgo(2) + "-10", billing: 10, terms: 15,
     notes: "Small but clean. Wants UGC added in Q3.",
   },
   {
-    name: "Nordwell Home", engagement: "one_time", vip: 0, status: "active",
+    name: "Nordwell Home", engagement: "one_time", vip: false, status: "active",
     services: ["Web & landing pages", "Performance creatives"],
     oneTime: 340000, delivery: 62000, health: "green", owner: "Laksh",
     start: monthsAgo(1) + "-01", end: addDays(today, 45), billing: 1, terms: 15,
     notes: "Site rebuild plus a creative bank. Billed in three phases.",
   },
   {
-    name: "Bluewater Fit", engagement: "retainer", vip: 0, status: "paused",
+    name: "Bluewater Fit", engagement: "retainer", vip: false, status: "paused",
     services: ["Performance marketing"],
     retainer: 95000, delivery: 44000, health: "red", owner: "Priya",
     start: monthsAgo(11) + "-01", billing: 1, terms: 15,
     notes: "Paused for one month while they sort inventory. Might not come back.",
   },
   {
-    name: "Stitchcraft", engagement: "retainer", vip: 0, status: "churned",
+    name: "Stitchcraft", engagement: "retainer", vip: false, status: "churned",
     services: ["Performance marketing", "UGC"],
     retainer: 0, delivery: 0, health: "red", owner: "Laksh",
     start: monthsAgo(14) + "-01", end: monthsAgo(3) + "-28", billing: 1, terms: 15,
@@ -92,29 +103,33 @@ const clients = [
   },
 ];
 
-const insertClient = db.prepare(
-  `INSERT INTO clients (name, slug, status, engagement, vip, services, retainer_amount,
-     one_time_value, delivery_cost, start_date, end_date, billing_day, terms_days, owner, health, notes)
-   VALUES (@name, @slug, @status, @engagement, @vip, @services, @retainer, @oneTime,
-     @delivery, @start, @end, @billing, @terms, @owner, @health, @notes)`,
-);
-
 const clientIds = new Map<string, number>();
 for (const client of clients) {
-  const result = insertClient.run({
-    ...client,
-    slug: client.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-    services: JSON.stringify(client.services),
-    retainer: client.retainer ?? 0,
-    oneTime: client.oneTime ?? 0,
-    end: client.end ?? null,
-  });
-  clientIds.set(client.name, Number(result.lastInsertRowid));
+  const [row] = await db.query<{ id: number }>(
+    ...named(
+      `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services,
+         retainer_amount, one_time_value, delivery_cost, start_date, end_date,
+         billing_day, terms_days, owner, health, notes)
+       VALUES (@name, @slug, @status, @engagement, @vip, @services::jsonb,
+         @retainer, @oneTime, @delivery, @start, @end,
+         @billing, @terms, @owner, @health, @notes)
+       RETURNING id`,
+      {
+        ...client,
+        slug: client.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        services: JSON.stringify(client.services),
+        retainer: client.retainer ?? 0,
+        oneTime: client.oneTime ?? 0,
+        end: client.end ?? null,
+      },
+    ),
+  );
+  clientIds.set(client.name, row.id);
 }
 
 /* -------------------------------------------------------------------- costs */
 
-const costs = [
+const costs: { category: string; label: string; person?: string; amount: number; cadence: string }[] = [
   { category: "salary", label: "Media buyer", person: "Priya Nair", amount: 95000, cadence: "monthly" },
   { category: "salary", label: "Creative strategist", person: "Aditya Rao", amount: 78000, cadence: "monthly" },
   { category: "salary", label: "Performance designer", person: "Meera Shah", amount: 62000, cadence: "monthly" },
@@ -140,29 +155,20 @@ const costs = [
   { category: "other", label: "CA and compliance", amount: 12000, cadence: "monthly" },
 ];
 
-const insertCost = db.prepare(
-  `INSERT INTO costs (category, label, person, amount, cadence, start_date, active)
-   VALUES (@category, @label, @person, @amount, @cadence, @start, 1)`,
-);
 // Costs start where the invoice history starts, so the P&L compares like with
 // like. Months before that show a dash rather than a full cost base against no
 // revenue, which would read as five catastrophic months that never happened.
 for (const cost of costs) {
-  insertCost.run({
-    ...cost,
-    person: cost.person ?? null,
-    start: monthsAgo(6) + "-01",
-  });
+  await db.query(
+    ...named(
+      `INSERT INTO foundery.costs (category, label, person, amount, cadence, start_date, active)
+       VALUES (@category, @label, @person, @amount, @cadence, @start, true)`,
+      { ...cost, person: cost.person ?? null, start: monthsAgo(6) + "-01" },
+    ),
+  );
 }
 
 /* ----------------------------------------------------------------- invoices */
-
-const insertInvoice = db.prepare(
-  `INSERT INTO invoices (client_id, number, period, issue_date, due_date, terms_days,
-     amount, amount_paid, status, paid_date, notes)
-   VALUES (@client_id, @number, @period, @issue_date, @due_date, @terms_days,
-     @amount, @amount_paid, @status, @paid_date, @notes)`,
-);
 
 let counter = 1;
 const year = new Date().getFullYear();
@@ -170,15 +176,27 @@ function invoiceNumber(): string {
   return `NRD-${year}-${String(counter++).padStart(3, "0")}`;
 }
 
+async function insertInvoice(row: Record<string, unknown>) {
+  await db.query(
+    ...named(
+      `INSERT INTO foundery.invoices (client_id, number, period, issue_date, due_date,
+         terms_days, amount, amount_paid, status, paid_date, notes)
+       VALUES (@client_id, @number, @period, @issue_date, @due_date,
+         @terms_days, @amount, @amount_paid, @status, @paid_date, @notes)`,
+      row,
+    ),
+  );
+}
+
 // Six months of settled history for the retainer clients, so the P&L has a shape.
 for (let back = 6; back >= 1; back--) {
   const month = monthsAgo(back);
   for (const name of ["Kidology", "UniSeoul", "Wellness Shop"]) {
-    const client = clients.find((c) => c.name === name)!;
+    const client = clients.find((candidate) => candidate.name === name)!;
     if (client.start > `${month}-28`) continue;
     const issue = billingDateFor(month, client.billing);
     const due = addDays(issue, client.terms);
-    insertInvoice.run({
+    await insertInvoice({
       client_id: clientIds.get(name)!,
       number: invoiceNumber(),
       period: month,
@@ -197,24 +215,15 @@ for (let back = 6; back >= 1; back--) {
 // The live picture: one overdue, one sitting inside terms, one still a draft,
 // and Halcyon deliberately left unbilled so the "you haven't raised it" nudge fires.
 const live = [
-  {
-    name: "Wellness Shop", status: "sent", issue: addDays(today, -38),
-    terms: 30, paid: 0, note: "Chased once by email. No reply.",
-  },
-  {
-    name: "Kidology", status: "part_paid", issue: addDays(today, -20),
-    terms: 15, paidFraction: 0.5, note: "Paid half while their finance team sorts the PO.",
-  },
-  {
-    name: "UniSeoul", status: "sent", issue: addDays(today, -4),
-    terms: 15, paid: 0, note: null,
-  },
+  { name: "Wellness Shop", status: "sent", issue: addDays(today, -38), terms: 30, paidFraction: 0, note: "Chased once by email. No reply." },
+  { name: "Kidology", status: "part_paid", issue: addDays(today, -20), terms: 15, paidFraction: 0.5, note: "Paid half while their finance team sorts the PO." },
+  { name: "UniSeoul", status: "sent", issue: addDays(today, -4), terms: 15, paidFraction: 0, note: null },
 ];
 
 for (const item of live) {
-  const client = clients.find((c) => c.name === item.name)!;
+  const client = clients.find((candidate) => candidate.name === item.name)!;
   const amount = client.retainer!;
-  insertInvoice.run({
+  await insertInvoice({
     client_id: clientIds.get(item.name)!,
     number: invoiceNumber(),
     period: thisMonth,
@@ -222,7 +231,7 @@ for (const item of live) {
     due_date: addDays(item.issue, item.terms),
     terms_days: item.terms,
     amount,
-    amount_paid: item.paidFraction ? amount * item.paidFraction : 0,
+    amount_paid: amount * item.paidFraction,
     status: item.status,
     paid_date: null,
     notes: item.note,
@@ -230,7 +239,7 @@ for (const item of live) {
 }
 
 // Nordwell's project, billed in phases.
-insertInvoice.run({
+await insertInvoice({
   client_id: clientIds.get("Nordwell Home")!,
   number: invoiceNumber(),
   period: "Phase 1 — discovery & design",
@@ -243,7 +252,7 @@ insertInvoice.run({
   paid_date: addDays(today, -14),
   notes: "40% up front.",
 });
-insertInvoice.run({
+await insertInvoice({
   client_id: clientIds.get("Nordwell Home")!,
   number: invoiceNumber(),
   period: "Phase 2 — build",
@@ -259,52 +268,64 @@ insertInvoice.run({
 
 /* --------------------------------------------------------------- onboarding */
 
-const formResult = db
-  .prepare(
-    `INSERT INTO onboarding_forms (title, intro, token, client_id, fields, status, created_by)
-     VALUES (@title, @intro, @token, NULL, @fields, 'open', 'founder')`,
-  )
-  .run({
-    title: "Neuroid client onboarding",
-    intro:
-      "Fifteen minutes here saves us a fortnight of back-and-forth later. Answer what you can — " +
-      "anything you don't have yet, leave blank and we'll pick it up on the kickoff call.",
-    token: crypto.randomBytes(18).toString("base64url"),
-    fields: JSON.stringify(DEFAULT_ONBOARDING_FIELDS.map((f) => ({ ...f, hint: f.hint || undefined }))),
-  });
+const [form] = await db.query<{ id: number }>(
+  ...named(
+    `INSERT INTO foundery.onboarding_forms (title, intro, token, client_id, fields, status, created_by)
+     VALUES (@title, @intro, @token, NULL, @fields::jsonb, 'open', 'founder')
+     RETURNING id`,
+    {
+      title: "Neuroid client onboarding",
+      intro:
+        "Fifteen minutes here saves us a fortnight of back-and-forth later. Answer what you can — " +
+        "anything you don't have yet, leave blank and we'll pick it up on the kickoff call.",
+      token: crypto.randomBytes(18).toString("base64url"),
+      fields: JSON.stringify(defaultFields()),
+    },
+  ),
+);
 
-db.prepare(`INSERT INTO onboarding_submissions (form_id, answers, submitted_at) VALUES (?, ?, ?)`).run(
-  Number(formResult.lastInsertRowid),
-  JSON.stringify({
-    brand: "Halcyon Coffee",
-    contact_name: "Ishita Menon",
-    contact_email: "ishita@halcyoncoffee.in",
-    whatsapp: "+91 98200 11223",
-    website: "https://halcyoncoffee.in",
-    category: "Speciality coffee beans and brewing kit",
-    monthly_spend: "About ₹4L across Meta and Google",
-    goal: "Get subscriptions past 1,000 active without the CAC running away.",
-    audience: "25–40, urban, already drink filter coffee, buying their first grinder.",
-    assets: "https://drive.google.com/drive/folders/example",
-    access: "Ishita holds the Meta and Shopify logins.",
-  }),
-  `${addDays(today, -12)} 10:24:00`,
+await db.query(
+  `INSERT INTO foundery.onboarding_submissions (form_id, answers, submitted_at)
+   VALUES ($1, $2::jsonb, $3)`,
+  [
+    form.id,
+    JSON.stringify({
+      brand: "Halcyon Coffee",
+      contact_name: "Ishita Menon",
+      contact_email: "ishita@halcyoncoffee.in",
+      whatsapp: "+91 98200 11223",
+      website: "https://halcyoncoffee.in",
+      category: "Speciality coffee beans and brewing kit",
+      monthly_spend: "About ₹4L across Meta and Google",
+      goal: "Get subscriptions past 1,000 active without the CAC running away.",
+      audience: "25–40, urban, already drink filter coffee, buying their first grinder.",
+      assets: "https://drive.google.com/drive/folders/example",
+      access: "Ishita holds the Meta and Shopify logins.",
+    }),
+    `${addDays(today, -12)} 10:24:00+00`,
+  ],
 );
 
 /* ------------------------------------------------------------------- P&L rows */
 
-const insertMonth = db.prepare(
-  `INSERT INTO pnl_months (month, other_income, one_off_costs, tax_rate, notes, closed)
-   VALUES (?, ?, ?, ?, ?, ?)`,
-);
-insertMonth.run(monthsAgo(3), 0, 45000, 0.25, "New camera kit for the content studio.", 1);
-insertMonth.run(monthsAgo(2), 60000, 0, 0.25, "One-off consulting day for a friend's brand.", 1);
-insertMonth.run(monthsAgo(1), 0, 0, 0.25, null, 1);
+for (const [month, otherIncome, oneOff, notes] of [
+  [monthsAgo(3), 0, 45000, "New camera kit for the content studio."],
+  [monthsAgo(2), 60000, 0, "One-off consulting day for a friend's brand."],
+  [monthsAgo(1), 0, 0, null],
+] as [string, number, number, string | null][]) {
+  await db.query(
+    `INSERT INTO foundery.pnl_months (month, other_income, one_off_costs, tax_rate, notes, closed)
+     VALUES ($1, $2, $3, 0.25, $4, true)
+     ON CONFLICT (month) DO NOTHING`,
+    [month, otherIncome, oneOff, notes],
+  );
+}
 
-setSetting("business_name", "Neuroid Media");
-setSetting("cash_buffer", "1800000");
+await setSetting("business_name", "Neuroid Media");
+await setSetting("cash_buffer", "1800000");
 
 console.log(
-  `Seeded ${clients.length} clients, ${costs.length} cost lines, ` +
-    `${counter - 1} invoices and 1 onboarding form.`,
+  `Seeded ${clients.length} clients, ${costs.length} cost lines, ${counter - 1} invoices ` +
+    `and 1 onboarding form into ${usingPostgresServer() ? "PostgreSQL" : "the local PGlite database"}.`,
 );
+process.exit(0);

@@ -16,12 +16,15 @@ const CADENCE_LABEL: Record<string, string> = Object.fromEntries(
 
 export default async function CostsPage() {
   const role = await requireRole();
-  const policy = policyFor(role);
   const currency = defaultCurrency();
 
-  const costs = listCosts(role);
-  const burn = monthlyBurn();
-  const totals = costTotals();
+  const [policy, costs, burn, totals, clients] = await Promise.all([
+    policyFor(role),
+    listCosts(role),
+    monthlyBurn(),
+    costTotals(),
+    clientOptions(),
+  ]);
 
   const rows: CostRowDisplay[] = costs.map((cost) => ({
     ...cost,
@@ -70,7 +73,7 @@ export default async function CostsPage() {
           burnLabel={fmtMoney(burn, currency)}
           canEdit={role === "founder"}
           currencySymbol={symbolFor(currency)}
-          clients={clientOptions().map((client) => ({ id: client.id, name: client.name }))}
+          clients={clients.map((client) => ({ id: client.id, name: client.name }))}
         />
       </PageBody>
     </>

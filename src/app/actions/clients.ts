@@ -2,22 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole } from "@/lib/auth";
-import { getDb, logAudit } from "@/lib/db";
+import { getDb, logAudit, named } from "@/lib/db";
 import { isCostCategory } from "@/lib/taxonomy";
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "client";
 }
 
-function uniqueSlug(base: string, excludeId?: number): string {
-  const db = getDb();
+async function uniqueSlug(base: string, excludeId?: number): Promise<string> {
+  const db = await getDb();
   let slug = base;
   let n = 2;
   for (;;) {
-    const clash = db
-      .prepare(`SELECT id FROM clients WHERE slug = ?${excludeId ? " AND id != ?" : ""}`)
-      .get(...(excludeId ? [slug, excludeId] : [slug])) as { id: number } | undefined;
-    if (!clash) return slug;
+    const clash = await db.query(
+      `SELECT id FROM foundery.clients WHERE slug = $1${excludeId ? " AND id <> $2" : ""}`,
+      excludeId ? [slug, excludeId] : [slug],
+    );
+    if (clash.length === 0) return slug;
     slug = `${base}-${n++}`;
   }
 }
@@ -42,7 +43,7 @@ export type ActionState = { error?: string; ok?: string };
  */
 export async function saveClient(_prev: ActionState, form: FormData): Promise<ActionState> {
   const role = await requireRole();
-  const db = getDb();
+  const db = await getDb();
 
   const id = Number(form.get("id") ?? 0) || null;
   const name = String(form.get("name") ?? "").trim();
@@ -60,7 +61,7 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
     name,
     status,
     engagement,
-    vip: form.get("vip") ? 1 : 0,
+    vip: Boolean(form.get("vip")),
     services: JSON.stringify(services),
     owner: text(form, "owner"),
     start_date: text(form, "start_date"),
@@ -83,41 +84,49 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
       : null;
 
   if (id) {
-    db.prepare(
-      `UPDATE clients SET name=@name, slug=@slug, status=@status, engagement=@engagement,
-         vip=@vip, services=@services, owner=@owner, start_date=@start_date, end_date=@end_date,
-         billing_day=@billing_day, terms_days=@terms_days, notes=@notes,
-         updated_at=datetime('now')
-       WHERE id=@id`,
-    ).run({ ...common, slug: uniqueSlug(slugify(name), id), id });
+    await db.query(
+      ...named(
+        `UPDATE foundery.clients SET name=@name, slug=@slug, status=@status, engagement=@engagement,
+           vip=@vip, services=@services::jsonb, owner=@owner, start_date=@start_date, end_date=@end_date,
+           billing_day=@billing_day, terms_days=@terms_days, notes=@notes,
+           updated_at=now()
+         WHERE id=@id`,
+        { ...common, slug: await uniqueSlug(slugify(name), id), id },
+      ),
+    );
 
     if (founderFields) {
-      db.prepare(
-        `UPDATE clients SET retainer_amount=@retainer_amount, one_time_value=@one_time_value,
-           delivery_cost=@delivery_cost, health=@health, updated_at=datetime('now')
-         WHERE id=@id`,
-      ).run({ ...founderFields, id });
+      await db.query(
+        ...named(
+          `UPDATE foundery.clients SET retainer_amount=@retainer_amount, one_time_value=@one_time_value,
+             delivery_cost=@delivery_cost, health=@health, updated_at=now()
+           WHERE id=@id`,
+          { ...founderFields, id },
+        ),
+      );
     }
-    logAudit(role, "client_updated", "client", id, name);
+    await logAudit(role, "client_updated", "client", id, name);
   } else {
-    const result = db
-      .prepare(
-        `INSERT INTO clients (name, slug, status, engagement, vip, services, owner,
+    const [created] = await db.query<{ id: number }>(
+      ...named(
+        `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, owner,
            start_date, end_date, billing_day, terms_days, notes,
            retainer_amount, one_time_value, delivery_cost, health)
-         VALUES (@name, @slug, @status, @engagement, @vip, @services, @owner,
+         VALUES (@name, @slug, @status, @engagement, @vip, @services::jsonb, @owner,
            @start_date, @end_date, @billing_day, @terms_days, @notes,
-           @retainer_amount, @one_time_value, @delivery_cost, @health)`,
-      )
-      .run({
-        ...common,
-        slug: uniqueSlug(slugify(name)),
-        retainer_amount: founderFields?.retainer_amount ?? 0,
-        one_time_value: founderFields?.one_time_value ?? 0,
-        delivery_cost: founderFields?.delivery_cost ?? 0,
-        health: founderFields?.health ?? "green",
-      });
-    logAudit(role, "client_created", "client", result.lastInsertRowid, name);
+           @retainer_amount, @one_time_value, @delivery_cost, @health)
+         RETURNING id`,
+        {
+          ...common,
+          slug: await uniqueSlug(slugify(name)),
+          retainer_amount: founderFields?.retainer_amount ?? 0,
+          one_time_value: founderFields?.one_time_value ?? 0,
+          delivery_cost: founderFields?.delivery_cost ?? 0,
+          health: founderFields?.health ?? "green",
+        },
+      ),
+    );
+    await logAudit(role, "client_created", "client", created.id, name);
   }
 
   revalidatePath("/clients");
@@ -131,11 +140,13 @@ export async function deleteClient(_prev: ActionState, form: FormData): Promise<
   await requireFounder();
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to delete." };
-  const row = getDb().prepare(`SELECT name FROM clients WHERE id = ?`).get(id) as
-    | { name: string }
-    | undefined;
-  getDb().prepare(`DELETE FROM clients WHERE id = ?`).run(id);
-  logAudit("founder", "client_deleted", "client", id, row?.name);
+  const db = await getDb();
+  const [row] = await db.query<{ name: string }>(
+    `SELECT name FROM foundery.clients WHERE id = $1`,
+    [id],
+  );
+  await db.query(`DELETE FROM foundery.clients WHERE id = $1`, [id]);
+  await logAudit("founder", "client_deleted", "client", id, row?.name);
   revalidatePath("/clients");
   revalidatePath("/invoices");
   return { ok: "Client removed." };
@@ -150,7 +161,7 @@ export async function deleteClient(_prev: ActionState, form: FormData): Promise<
  */
 export async function saveCost(_prev: ActionState, form: FormData): Promise<ActionState> {
   await requireFounder();
-  const db = getDb();
+  const db = await getDb();
 
   const id = Number(form.get("id") ?? 0) || null;
   const category = String(form.get("category") ?? "");
@@ -170,29 +181,34 @@ export async function saveCost(_prev: ActionState, form: FormData): Promise<Acti
     cadence,
     start_date: text(form, "start_date"),
     end_date: text(form, "end_date"),
-    active: form.get("active") ? 1 : 0,
+    active: Boolean(form.get("active")),
     client_id: Number(form.get("client_id") ?? 0) || null,
     notes: text(form, "notes"),
   };
 
   if (id) {
-    db.prepare(
-      `UPDATE costs SET category=@category, label=@label, person=@person, amount=@amount,
-         cadence=@cadence, start_date=@start_date, end_date=@end_date, active=@active,
-         client_id=@client_id, notes=@notes, updated_at=datetime('now')
-       WHERE id=@id`,
-    ).run({ ...payload, id });
-    logAudit("founder", "cost_updated", "cost", id, `${category}: ${label}`);
+    await db.query(
+      ...named(
+        `UPDATE foundery.costs SET category=@category, label=@label, person=@person, amount=@amount,
+           cadence=@cadence, start_date=@start_date, end_date=@end_date, active=@active,
+           client_id=@client_id, notes=@notes, updated_at=now()
+         WHERE id=@id`,
+        { ...payload, id },
+      ),
+    );
+    await logAudit("founder", "cost_updated", "cost", id, `${category}: ${label}`);
   } else {
-    const result = db
-      .prepare(
-        `INSERT INTO costs (category, label, person, amount, cadence, start_date, end_date,
+    const [created] = await db.query<{ id: number }>(
+      ...named(
+        `INSERT INTO foundery.costs (category, label, person, amount, cadence, start_date, end_date,
            active, client_id, notes)
          VALUES (@category, @label, @person, @amount, @cadence, @start_date, @end_date,
-           @active, @client_id, @notes)`,
-      )
-      .run(payload);
-    logAudit("founder", "cost_created", "cost", result.lastInsertRowid, `${category}: ${label}`);
+           @active, @client_id, @notes)
+         RETURNING id`,
+        payload,
+      ),
+    );
+    await logAudit("founder", "cost_created", "cost", created.id, `${category}: ${label}`);
   }
 
   revalidatePath("/costs");
@@ -205,8 +221,9 @@ export async function deleteCost(_prev: ActionState, form: FormData): Promise<Ac
   await requireFounder();
   const id = Number(form.get("id") ?? 0);
   if (!id) return { error: "Nothing to delete." };
-  getDb().prepare(`DELETE FROM costs WHERE id = ?`).run(id);
-  logAudit("founder", "cost_deleted", "cost", id);
+  const db = await getDb();
+  await db.query(`DELETE FROM foundery.costs WHERE id = $1`, [id]);
+  await logAudit("founder", "cost_deleted", "cost", id);
   revalidatePath("/costs");
   revalidatePath("/founder");
   return { ok: "Cost removed." };
