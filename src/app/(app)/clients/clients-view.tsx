@@ -11,6 +11,7 @@ import {
   CLIENT_STATUS, ENGAGEMENT, HEALTH, ONBOARDING_STATUS, type ClientStatus, type OnboardingStatus,
 } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
+import { prettyDate } from "@/lib/dates";
 import { ClientEditor } from "./client-editor";
 
 export type ClientMoney = {
@@ -101,6 +102,7 @@ export function ClientsView({
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("working");
+  const [dealFilter, setDealFilter] = useState("all");
   const [editing, setEditing] = useState<ClientView | null>(null);
   const [open, setOpen] = useState(false);
   // Bumped on every open: folded into the editor's key so each open is a
@@ -115,6 +117,7 @@ export function ClientsView({
       if (statusFilter === "working" && client.status === "churned") return false;
       if (statusFilter !== "working" && statusFilter !== "all" && client.status !== statusFilter)
         return false;
+      if (dealFilter !== "all" && client.engagement !== dealFilter) return false;
       if (!needle) return true;
       return (
         client.name.toLowerCase().includes(needle) ||
@@ -122,7 +125,7 @@ export function ClientsView({
         client.services.some((service) => service.toLowerCase().includes(needle))
       );
     });
-  }, [clients, query, statusFilter]);
+  }, [clients, query, statusFilter, dealFilter]);
 
   function edit(client: ClientView | null) {
     setEditing(client);
@@ -162,6 +165,17 @@ export function ClientsView({
             <option value="paused">Paused</option>
             <option value="churned">Churned</option>
             <option value="all">Everyone</option>
+          </Select>
+        </div>
+        <div className="w-[150px] shrink-0">
+          <Select
+            value={dealFilter}
+            onChange={(event) => setDealFilter(event.target.value)}
+            aria-label="Filter by deal type"
+          >
+            <option value="all">All deals</option>
+            <option value="retainer">Retainers</option>
+            <option value="one_time">One-off projects</option>
           </Select>
         </div>
         <Button variant="primary" onClick={() => edit(null)} className="shrink-0">
@@ -260,8 +274,13 @@ export function ClientsView({
 
                       <p className="mt-0.5 truncate text-[11.5px] text-[var(--color-ink-3)]">
                         {ENGAGEMENT[client.engagement].short}
-                        {client.owner ? ` · ${client.owner}` : ""} · bills day {client.billing_day} ·
-                        net {client.terms_days}
+                        {client.owner ? ` · ${client.owner}` : ""}
+                        {client.engagement === "one_time"
+                          ? client.end_date
+                            ? ` · ships ${prettyDate(client.end_date)}`
+                            : " · no ship date set"
+                          : ` · bills day ${client.billing_day}`}{" "}
+                        · net {client.terms_days}
                       </p>
 
                       <div className="mt-3 flex min-h-[22px] flex-wrap gap-1">

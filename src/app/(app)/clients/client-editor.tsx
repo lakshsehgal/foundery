@@ -1,12 +1,40 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { CalendarRange, Repeat } from "lucide-react";
 import { saveClient, type ActionState } from "@/app/actions/clients";
 import { Button, Field, Select, TextArea, TextInput } from "@/components/ui/form";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { SERVICES } from "@/lib/taxonomy";
+import { SERVICES, type Engagement } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
+
+/**
+ * A retainer and a one-off project are different deals, so the form changes
+ * shape with the choice: a retainer asks for a monthly price and an open-ended
+ * run; a project asks for a total price and the months it covers. The field
+ * that isn't shown is still posted (hidden, carrying its stored value) so
+ * switching the toggle to look never wipes a number.
+ */
+const ENGAGEMENT_OPTIONS: {
+  key: Engagement;
+  label: string;
+  line: string;
+  icon: typeof Repeat;
+}[] = [
+  {
+    key: "retainer",
+    label: "Monthly retainer",
+    line: "Bills every month until someone ends it.",
+    icon: Repeat,
+  },
+  {
+    key: "one_time",
+    label: "One-off project",
+    line: "A fixed price, delivered and done.",
+    icon: CalendarRange,
+  },
+];
 
 export function ClientEditor({
   open, onClose, client, canEditValues, currencySymbol,
@@ -18,6 +46,10 @@ export function ClientEditor({
   currencySymbol: string;
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(saveClient, {});
+  const [engagement, setEngagement] = useState<Engagement>(
+    client?.engagement === "one_time" ? "one_time" : "retainer",
+  );
+  const retainer = engagement === "retainer";
 
   useEffect(() => {
     if (state.ok) {
@@ -50,13 +82,62 @@ export function ClientEditor({
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Engagement" htmlFor="engagement">
-            <Select id="engagement" name="engagement" defaultValue={client?.engagement ?? "retainer"}>
-              <option value="retainer">Monthly retainer</option>
-              <option value="one_time">One-off project</option>
-            </Select>
-          </Field>
+        <fieldset>
+          <legend className="mb-1.5 text-[12px] font-medium text-[var(--color-ink-2)]">
+            What kind of deal is this?
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ENGAGEMENT_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              const selected = engagement === option.key;
+              return (
+                <label
+                  key={option.key}
+                  className={`flex cursor-pointer select-none items-start gap-2.5 rounded-[var(--radius-md)] border px-3 py-2.5 transition-colors ${
+                    selected
+                      ? "border-transparent bg-[var(--color-brand)]"
+                      : "border-[var(--color-line-strong)] hover:bg-[var(--color-surface-2)]"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="engagement"
+                    value={option.key}
+                    checked={selected}
+                    onChange={() => setEngagement(option.key)}
+                    className="sr-only"
+                  />
+                  <Icon
+                    size={15}
+                    aria-hidden
+                    className="mt-[2px] shrink-0"
+                    style={{ color: selected ? "var(--color-brand-ink)" : "var(--color-ink-3)" }}
+                  />
+                  <span className="min-w-0">
+                    <span
+                      className="block text-[13px] font-semibold"
+                      style={selected ? { color: "var(--color-brand-ink)" } : undefined}
+                    >
+                      {option.label}
+                    </span>
+                    <span
+                      className="block text-[11.5px] leading-relaxed"
+                      style={{
+                        color: selected
+                          ? "color-mix(in srgb, var(--color-brand-ink) 75%, transparent)"
+                          : "var(--color-ink-3)",
+                      }}
+                    >
+                      {option.line}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Status" htmlFor="status">
             <Select id="status" name="status" defaultValue={client?.status ?? "active"}>
               <option value="active">Active</option>
@@ -118,12 +199,12 @@ export function ClientEditor({
         </label>
 
         {canEditValues && (
-          <div className="grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] p-3.5 sm:grid-cols-3">
+          <div className="grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] p-3.5 sm:grid-cols-2">
             <Field
               label="Zoho Books customer name"
               htmlFor="zoho_name"
               hint="Exactly as it appears in Zoho — usually the legal name. Used to match their invoices when syncing."
-              className="sm:col-span-3"
+              className="sm:col-span-2"
             >
               <TextInput
                 id="zoho_name"
@@ -132,28 +213,49 @@ export function ClientEditor({
                 placeholder="e.g. MACKLY CLOTHING PRIVATE LIMITED"
               />
             </Field>
-            <Field label={`Retainer / month (${currencySymbol})`} htmlFor="retainer_amount">
-              <TextInput
-                id="retainer_amount"
-                name="retainer_amount"
-                inputMode="decimal"
-                defaultValue={client?.retainer_amount || ""}
-                placeholder="0"
-              />
-            </Field>
-            <Field label={`Project value (${currencySymbol})`} htmlFor="one_time_value">
-              <TextInput
-                id="one_time_value"
-                name="one_time_value"
-                inputMode="decimal"
-                defaultValue={client?.one_time_value || ""}
-                placeholder="0"
-              />
-            </Field>
+            {retainer ? (
+              <>
+                <Field
+                  label={`Retainer / month (${currencySymbol})`}
+                  htmlFor="retainer_amount"
+                  hint="The monthly fee. Counts as recurring revenue everywhere."
+                >
+                  <TextInput
+                    id="retainer_amount"
+                    name="retainer_amount"
+                    inputMode="decimal"
+                    defaultValue={client?.retainer_amount || ""}
+                    placeholder="0"
+                  />
+                </Field>
+                <input type="hidden" name="one_time_value" value={client?.one_time_value || ""} />
+              </>
+            ) : (
+              <>
+                <Field
+                  label={`Project value — total (${currencySymbol})`}
+                  htmlFor="one_time_value"
+                  hint="The whole contract. Analytics spread it evenly across the project's months."
+                >
+                  <TextInput
+                    id="one_time_value"
+                    name="one_time_value"
+                    inputMode="decimal"
+                    defaultValue={client?.one_time_value || ""}
+                    placeholder="0"
+                  />
+                </Field>
+                <input type="hidden" name="retainer_amount" value={client?.retainer_amount || ""} />
+              </>
+            )}
             <Field
-              label={`Cost to serve (${currencySymbol})`}
+              label={`Cost to serve / month (${currencySymbol})`}
               htmlFor="delivery_cost"
-              hint="Monthly. Drives the margin on the founder dashboard."
+              hint={
+                retainer
+                  ? "Monthly. Drives the margin on the founder dashboard."
+                  : "Per month while the project runs. Drives the margin on the founder dashboard."
+              }
             >
               <TextInput
                 id="delivery_cost"
@@ -167,13 +269,25 @@ export function ClientEditor({
         )}
 
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label="Started" htmlFor="start_date">
+          <Field label={retainer ? "Started" : "Project starts"} htmlFor="start_date">
             <TextInput id="start_date" name="start_date" type="date" defaultValue={client?.start_date ?? ""} />
           </Field>
-          <Field label="Ends" htmlFor="end_date" hint="Leave empty if open-ended.">
+          <Field
+            label={retainer ? "Ends" : "Project ends"}
+            htmlFor="end_date"
+            hint={
+              retainer
+                ? "Leave empty if open-ended."
+                : "Set both dates — the value is spread across these months. Without them we assume three."
+            }
+          >
             <TextInput id="end_date" name="end_date" type="date" defaultValue={client?.end_date ?? ""} />
           </Field>
-          <Field label="Billing day" htmlFor="billing_day" hint="Day of the month.">
+          <Field
+            label="Billing day"
+            htmlFor="billing_day"
+            hint={retainer ? "The retainer bills this day each month." : "Milestone invoices go out this day."}
+          >
             <TextInput
               id="billing_day"
               name="billing_day"

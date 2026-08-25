@@ -29,10 +29,23 @@ export function spreadProject(value: number, start: string | null, end: string |
   return value / Math.max(1, months);
 }
 
-export function monthlyRevenue(contract: Contract): number {
+/**
+ * The same contract, split by nature: `recurring` renews by itself next month,
+ * `project` stops when the work ships. Every screen that separates retainers
+ * from one-off projects derives the split here so the two never disagree.
+ */
+export function revenueSplit(contract: Contract): { recurring: number; project: number } {
   return contract.engagement === "retainer"
-    ? contract.retainer_amount
-    : spreadProject(contract.one_time_value, contract.start_date, contract.end_date);
+    ? { recurring: contract.retainer_amount, project: 0 }
+    : {
+        recurring: 0,
+        project: spreadProject(contract.one_time_value, contract.start_date, contract.end_date),
+      };
+}
+
+export function monthlyRevenue(contract: Contract): number {
+  const split = revenueSplit(contract);
+  return split.recurring + split.project;
 }
 
 /** Null rather than a confident zero when there's no revenue to divide by. */

@@ -57,6 +57,31 @@ export default async function FounderPage() {
   const band = BAND_COPY[risk.band];
   const BandIcon = band.icon;
 
+  // The two halves of the book, each with its own subtotal: money that renews
+  // by itself, and money that has to be re-sold when the work ships.
+  const books = [
+    {
+      key: "retainer",
+      label: "Retainers",
+      hint: "Recurring — renews every month",
+      tone: "var(--color-series-1)",
+      clients: economics.filter((c) => c.engagement === "retainer"),
+    },
+    {
+      key: "one_time",
+      label: "One-off projects",
+      hint: "Spread across the months they run, then gone",
+      tone: "var(--color-series-4)",
+      clients: economics.filter((c) => c.engagement !== "retainer"),
+    },
+  ]
+    .map((book) => ({
+      ...book,
+      mrr: book.clients.reduce((sum, c) => sum + c.mrr, 0),
+      deliveryCost: book.clients.reduce((sum, c) => sum + c.deliveryCost, 0),
+    }))
+    .filter((book) => book.clients.length > 0);
+
   return (
     <>
       <PageHeader title="Founder dashboard" subtitle="Margins, what's coming, and what could go wrong" />
@@ -66,7 +91,7 @@ export default async function FounderPage() {
             label="Monthly revenue"
             count={<Ticker value={head.mrr} format="compact" currency={currency} />}
             tone="var(--color-series-1)"
-            hint={`${head.activeClients} active · ${head.vipClients} VIP`}
+            hint={`${fmtCompact(head.recurring, currency)} recurring · ${fmtCompact(head.project, currency)} projects`}
           />
           <StatTile
             label="Monthly cost base"
@@ -100,7 +125,7 @@ export default async function FounderPage() {
             <div className="min-w-0 flex-1">
               <CardTitle
                 title="Risk"
-                hint="The five ways a small agency actually gets hurt, scored against your own numbers."
+                hint="The six ways a small agency actually gets hurt, scored against your own numbers."
               />
             </div>
             <div
@@ -156,11 +181,33 @@ export default async function FounderPage() {
           </ul>
         </Card>
 
+        {/* --------------------------------------------------- revenue mix */}
+        <Card>
+          <CardTitle
+            title="Revenue mix — recurring vs one-off"
+            hint="A retainer renews by itself; a project has to be re-sold when it ships. The mix says how much of next month is already won."
+          />
+          <BarRow
+            label={`Retainers · ${head.retainerClients} client${head.retainerClients === 1 ? "" : "s"}`}
+            value={head.recurring}
+            total={head.mrr}
+            tone="var(--color-series-1)"
+            right={fmtMoney(head.recurring, currency)}
+          />
+          <BarRow
+            label={`One-off projects · ${head.projectClients} client${head.projectClients === 1 ? "" : "s"}`}
+            value={head.project}
+            total={head.mrr}
+            tone="var(--color-series-4)"
+            right={fmtMoney(head.project, currency)}
+          />
+        </Card>
+
         {/* ---------------------------------------------------- projection */}
         <Card>
           <CardTitle
             title="Next six months, on today's contracts"
-            hint="No growth assumed and no renewals invented — a retainer stops on its end date. The cliff shows up before it arrives."
+            hint="No growth assumed and no renewals invented — a retainer stops on its end date, a project stops when it ships. The cliff shows up before it arrives."
           />
           <ProfitBars
             points={forecast.map((month) => ({
@@ -173,10 +220,12 @@ export default async function FounderPage() {
             }))}
           />
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left">
+            <table className="w-full min-w-[680px] text-left">
               <thead>
                 <tr>
                   <Th>Month</Th>
+                  <Th align="right">Recurring</Th>
+                  <Th align="right">Projects</Th>
                   <Th align="right">Revenue</Th>
                   <Th align="right">Costs</Th>
                   <Th align="right">Profit</Th>
@@ -187,6 +236,16 @@ export default async function FounderPage() {
                 {forecast.map((month) => (
                   <tr key={month.month}>
                     <Td>{month.label}</Td>
+                    <Td align="right">
+                      <span className="tabular text-[var(--color-ink-2)]">
+                        {fmtMoney(month.recurring, currency)}
+                      </span>
+                    </Td>
+                    <Td align="right">
+                      <span className="tabular text-[var(--color-ink-2)]">
+                        {month.project > 0 ? fmtMoney(month.project, currency) : "—"}
+                      </span>
+                    </Td>
                     <Td align="right">
                       <span className="tabular">{fmtMoney(month.revenue, currency)}</span>
                     </Td>
@@ -230,7 +289,7 @@ export default async function FounderPage() {
           <div className="p-4 pb-0">
             <CardTitle
               title="Margin by client"
-              hint="Monthly revenue against what it costs to deliver. A project is spread across the months it runs so it sits fairly next to a retainer."
+              hint="Monthly revenue against what it costs to deliver, retainers and one-off projects on their own subtotals. A project is spread across the months it runs so it sits fairly next to a retainer."
             />
           </div>
           <TableWrap>
@@ -245,8 +304,21 @@ export default async function FounderPage() {
                 <Th>Health</Th>
               </tr>
             </thead>
-            <tbody>
-              {economics.map((client) => (
+            {books.map((book) => (
+            <tbody key={book.key}>
+              <tr>
+                <td
+                  colSpan={7}
+                  className="border-b border-[var(--color-line)] px-3 pb-1.5 pt-3.5 text-[11px] font-bold uppercase tracking-[0.08em]"
+                  style={{ color: book.tone }}
+                >
+                  {book.label}
+                  <span className="ml-2 font-medium normal-case tracking-normal text-[var(--color-ink-3)]">
+                    {book.hint}
+                  </span>
+                </td>
+              </tr>
+              {book.clients.map((client) => (
                 <tr key={client.id} className="transition-colors hover:bg-[var(--color-surface-2)]">
                   <Td>
                     <div className="flex min-w-0 items-center gap-1.5">
@@ -304,7 +376,39 @@ export default async function FounderPage() {
                   </Td>
                 </tr>
               ))}
+              <tr className="bg-[var(--color-surface-2)]">
+                <Td>
+                  <span className="text-[12px] font-semibold text-[var(--color-ink-2)]">
+                    {book.label} — {book.clients.length} client{book.clients.length === 1 ? "" : "s"}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <span className="tabular font-semibold">{fmtMoney(book.mrr, currency)}</span>
+                </Td>
+                <Td align="right">
+                  <span className="tabular font-semibold text-[var(--color-ink-2)]">
+                    {fmtMoney(book.deliveryCost, currency)}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <span className="tabular font-semibold">
+                    {fmtMoney(book.mrr - book.deliveryCost, currency)}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <span className="tabular font-semibold">
+                    {book.mrr > 0 ? fmtPct(((book.mrr - book.deliveryCost) / book.mrr) * 100, 0) : "—"}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <span className="tabular font-semibold text-[var(--color-ink-2)]">
+                    {head.mrr > 0 ? fmtPct((book.mrr / head.mrr) * 100, 0) : "—"}
+                  </span>
+                </Td>
+                <Td />
+              </tr>
             </tbody>
+            ))}
           </TableWrap>
         </Card>
 

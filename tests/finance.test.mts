@@ -8,7 +8,9 @@ const { getDb } = await import("../src/lib/db");
 const { costsForMonth, monthlyBurn } = await import("../src/lib/queries");
 const { pnl, pnlTotals, riskReport, projection, clientEconomics } = await import("../src/lib/analytics");
 const { fmtPct, fmtCompact, monthlyEquivalent } = await import("../src/lib/money");
-const { spreadProject, marginPct } = await import("../src/lib/economics");
+const { spreadProject, marginPct, revenueSplit, monthlyRevenue } = await import(
+  "../src/lib/economics"
+);
 const { billingDateFor, daysUntil, lastMonths } = await import("../src/lib/dates");
 
 const db = await getDb();
@@ -70,6 +72,40 @@ describe("contracts", () => {
   test("margin is null rather than zero when there is no revenue to divide by", () => {
     assert.equal(marginPct(0, 5000), null);
     assert.equal(marginPct(100000, 40000), 60);
+  });
+
+  test("a retainer is all recurring, a project is all one-off, and the halves sum to the total", () => {
+    const retainer = {
+      engagement: "retainer",
+      retainer_amount: 80000,
+      one_time_value: 0,
+      start_date: null,
+      end_date: null,
+    };
+    const project = {
+      engagement: "one_time",
+      retainer_amount: 0,
+      one_time_value: 300000,
+      start_date: "2026-07-01",
+      end_date: "2026-09-30",
+    };
+    assert.deepEqual(revenueSplit(retainer), { recurring: 80000, project: 0 });
+    assert.deepEqual(revenueSplit(project), { recurring: 0, project: 100000 });
+    assert.equal(monthlyRevenue(retainer), 80000);
+    assert.equal(monthlyRevenue(project), 100000);
+  });
+
+  test("a retainer's stray one-time value never leaks into recurring revenue", () => {
+    // A client switched from project to retainer keeps the old total on the
+    // row (the form carries it so nothing is wiped) — it must not be counted.
+    const switched = {
+      engagement: "retainer",
+      retainer_amount: 60000,
+      one_time_value: 250000,
+      start_date: null,
+      end_date: null,
+    };
+    assert.deepEqual(revenueSplit(switched), { recurring: 60000, project: 0 });
   });
 });
 

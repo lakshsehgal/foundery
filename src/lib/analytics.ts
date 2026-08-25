@@ -19,6 +19,8 @@ export type ClientEconomics = {
   vip: boolean;
   engagement: string;
   health: Health;
+  /** When the contract ends — the project-cliff maths reads this. */
+  endDate: string | null;
   /** Monthly recognised revenue. A project is spread over its live months. */
   mrr: number;
   deliveryCost: number;
@@ -52,6 +54,7 @@ export async function clientEconomics(): Promise<ClientEconomics[]> {
       vip: row.vip,
       engagement: row.engagement,
       health: row.health as Health,
+      endDate: row.end_date,
       mrr,
       deliveryCost: row.delivery_cost,
       grossProfit,
@@ -71,6 +74,12 @@ export async function clientEconomics(): Promise<ClientEconomics[]> {
 
 export type Headline = {
   mrr: number;
+  /** The part of mrr that renews by itself: retainers only. */
+  recurring: number;
+  /** The part that stops when the work ships: one-off projects, spread monthly. */
+  project: number;
+  retainerClients: number;
+  projectClients: number;
   burn: number;
   grossProfit: number;
   netProfit: number;
@@ -90,12 +99,18 @@ export async function headline(): Promise<Headline> {
     getSetting("cash_buffer", ""),
   ]);
   const mrr = economics.reduce((sum, c) => sum + c.mrr, 0);
+  const retainers = economics.filter((c) => c.engagement === "retainer");
+  const recurring = retainers.reduce((sum, c) => sum + c.mrr, 0);
   const deliveryCost = economics.reduce((sum, c) => sum + c.deliveryCost, 0);
   const netProfit = mrr - burn;
   const cashBuffer = bufferRaw === "" ? null : Number(bufferRaw);
 
   return {
     mrr,
+    recurring,
+    project: mrr - recurring,
+    retainerClients: retainers.length,
+    projectClients: economics.length - retainers.length,
     burn,
     grossProfit: mrr - deliveryCost,
     netProfit,
@@ -115,6 +130,10 @@ export type ProjectedMonth = {
   month: string;
   label: string;
   revenue: number;
+  /** Retainer revenue in the month — the part that renews by itself. */
+  recurring: number;
+  /** One-off project revenue in the month — the part that ends. */
+  project: number;
   costs: number;
   profit: number;
   /** Confidence shrinks the further out we look. */
@@ -144,19 +163,24 @@ export async function projection(months = 6): Promise<ProjectedMonth[]> {
   for (let i = 0; i < months; i++) {
     const date = new Date(start.getFullYear(), start.getMonth() + i, 1);
     const key = monthKey(date);
-    let revenue = 0;
+    let recurring = 0;
+    let project = 0;
     for (const row of rows) {
       if (row.end_date && row.end_date.slice(0, 7) < key) continue;
       if (row.start_date && row.start_date.slice(0, 7) > key) continue;
-      revenue +=
-        row.engagement === "retainer"
-          ? row.retainer_amount
-          : spreadProject(row.one_time_value, row.start_date, row.end_date);
+      if (row.engagement === "retainer") {
+        recurring += row.retainer_amount;
+      } else {
+        project += spreadProject(row.one_time_value, row.start_date, row.end_date);
+      }
     }
+    const revenue = recurring + project;
     out.push({
       month: key,
       label: monthLabel(key),
       revenue,
+      recurring,
+      project,
       costs: burn,
       profit: revenue - burn,
       confidence: i === 0 ? "booked" : i <= 2 ? "likely" : "assumed",
@@ -187,11 +211,12 @@ export type RiskReport = {
 const SEVERITY_WEIGHT = { good: 0, warning: 8, serious: 18, critical: 30 };
 
 /**
- * The five ways a small agency actually gets hurt: one client is too much of
+ * The six ways a small agency actually gets hurt: one client is too much of
  * the revenue, the money is late, the margin is thin, the cost base is fixed
- * while the revenue isn't, and an account is quietly on its way out. Each is
+ * while the revenue isn't, an account is quietly on its way out, and too much
+ * of the book is one-off work that has to be re-sold every quarter. Each is
  * scored on its own and the report is the sum, capped — one critical finding
- * shouldn't be averaged away by four calm ones.
+ * shouldn't be averaged away by five calm ones.
  */
 export async function riskReport(today = todayISO()): Promise<RiskReport> {
   const findings: RiskFinding[] = [];
@@ -332,6 +357,47 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
     severity: healthSeverity,
     metric: `${atRiskShare.toFixed(0)}%`,
     action: atRisk.length === 0 ? "Nothing to do." : "Book the calls this week, not next.",
+  });
+
+  // 6 — Revenue mix. A retainer renews by itself; a project has to be re-sold.
+  // Two signals share the finding: how much of the book is one-off work, and
+  // how much of that one-off revenue disappears inside the next 60 days.
+  const projects = economics.filter((c) => c.engagement !== "retainer");
+  const projectMrr = projects.reduce((sum, c) => sum + c.mrr, 0);
+  const projectShare = totalMrr > 0 ? (projectMrr / totalMrr) * 100 : 0;
+  const horizon = new Date(today);
+  horizon.setDate(horizon.getDate() + 60);
+  const horizonISO = horizon.toISOString().slice(0, 10);
+  const endingSoon = projects.filter((c) => c.endDate !== null && c.endDate <= horizonISO);
+  const endingSoonMrr = endingSoon.reduce((sum, c) => sum + c.mrr, 0);
+  const cliffShare = totalMrr > 0 ? (endingSoonMrr / totalMrr) * 100 : 0;
+
+  const mixSeverity =
+    cliffShare >= 25 || projectShare >= 60
+      ? "serious"
+      : cliffShare >= 10 || projectShare >= 40
+        ? "warning"
+        : "good";
+  findings.push({
+    key: "revenue_mix",
+    title:
+      projectMrr <= 0
+        ? "All revenue is recurring"
+        : `${projectShare.toFixed(0)}% of revenue is one-off project work`,
+    detail:
+      projectMrr <= 0
+        ? "Every active account is on a retainer — next month starts where this one ended."
+        : endingSoon.length > 0
+          ? `${endingSoon.map((c) => c.name).join(", ")} ship${endingSoon.length === 1 ? "s" : ""} within 60 days — ${cliffShare.toFixed(0)}% of revenue with nothing behind it yet.`
+          : "Project work is fine money, but every rupee of it has to be re-sold when it ships.",
+    severity: mixSeverity,
+    metric: projectMrr <= 0 ? "0%" : `${projectShare.toFixed(0)}%`,
+    action:
+      mixSeverity === "good"
+        ? "Nothing to do."
+        : endingSoon.length > 0
+          ? "Pitch the retainer conversion before the project wraps, not after."
+          : "Convert the best project clients to retainers, or keep the pipeline two projects deep.",
   });
 
   const score = Math.min(
