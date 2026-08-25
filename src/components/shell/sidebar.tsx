@@ -115,9 +115,9 @@ export function Sidebar({ role, email }: { role: Role; email: string | null }) {
           className={`mx-auto h-6 w-6 rounded-[var(--radius-xs)] ${collapsed ? "" : "lg:hidden"}`}
           style={{ background: "var(--color-brand)" }}
         />
-        <span className={`${block} items-baseline gap-2`}>
-          <Logo size={22} />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-ink-3)]">
+        <span className={`${block} items-center gap-2.5`}>
+          <Logo size={26} />
+          <span className="mt-[3px] text-[11px] font-semibold uppercase leading-none tracking-[0.2em] text-[var(--color-ink-3)]">
             Cortex
           </span>
         </span>
