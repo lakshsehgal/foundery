@@ -83,8 +83,11 @@ export default async function InvoicesPage() {
             )}
           </p>
           <p className="mt-0.5 text-[11.5px] text-[var(--color-ink-3)]">
-            Bills day {task.billingDay}
-            {task.amount !== null && ` · ${fmtMoney(task.amount, currency)} / month`}
+            {task.engagement === "one_time"
+              ? `Project kicks off ${prettyDate(task.raiseOn)}`
+              : `Bills day ${task.billingDay}`}
+            {task.amount !== null &&
+              ` · ${fmtMoney(task.amount, currency)}${task.engagement === "one_time" ? " total" : " / month"}`}
           </p>
         </div>
         <Chip tone={status.tone}>{status.label}</Chip>
@@ -128,7 +131,7 @@ export default async function InvoicesPage() {
             label="Raised"
             count={<Ticker value={raisedCount} />}
             tone="var(--color-good)"
-            hint={`Of ${current.length} retainer${current.length === 1 ? "" : "s"} this month`}
+            hint={`Of ${current.length} invoice${current.length === 1 ? "" : "s"} this month`}
           />
           <StatTile
             label="Awaiting payment"
@@ -184,7 +187,7 @@ export default async function InvoicesPage() {
           <div className="p-4 pb-0">
             <CardTitle
               title={`This month — ${monthLabel}`}
-              hint="Every active retainer, in billing-day order. Raise the invoice in Zoho Books, mark it, then tick again when the payment lands."
+              hint="Every retainer on its billing day, plus one-off projects kicking off this month. Raise the invoice in Zoho Books, mark it, then tick again when the payment lands."
             />
           </div>
           {current.length === 0 ? (
@@ -205,8 +208,8 @@ export default async function InvoicesPage() {
         <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-[var(--color-ink-3)]">
           <AlertTriangle size={13} className="mt-[1px] shrink-0" aria-hidden />
           Amounts, PDFs and the actual chasing live in Zoho Books. This list answers two questions —
-          did this month&apos;s invoice go out, and did the money come in? One-off project invoices
-          are raised straight in Zoho as milestones land.
+          did this month&apos;s invoice go out, and did the money come in? A one-off project shows up
+          here once, in the month it starts; further milestone invoices are raised straight in Zoho.
         </p>
       </PageBody>
     </>

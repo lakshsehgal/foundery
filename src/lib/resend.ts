@@ -105,9 +105,10 @@ export function paymentReminderEmail(input: {
     `<p style="margin:0 0 14px;color:#1f2430;font-size:14px;line-height:1.65;">${text}</p>`;
 
   return {
+    // Plain hyphen on purpose: an em dash in a subject line reads templated.
     subject: numbers
-      ? `Checking in on invoice ${input.invoiceNumbers.trim()} — ${input.brand.trim()}`
-      : `Checking in on our ${input.monthLabel.trim()} invoice — ${input.brand.trim()}`,
+      ? `Checking in on invoice ${input.invoiceNumbers.trim()} - ${input.brand.trim()}`
+      : `Checking in on our ${input.monthLabel.trim()} invoice - ${input.brand.trim()}`,
     html: `
 <div style="margin:0;padding:8px 4px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   ${paragraph(`Hi ${brand} team,`)}

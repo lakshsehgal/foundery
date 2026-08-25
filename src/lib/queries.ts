@@ -285,6 +285,8 @@ export type BillingTask = {
   clientId: number;
   clientName: string;
   vip: boolean;
+  /** A monthly retainer, or a one-off project invoiced when it kicks off. */
+  engagement: "retainer" | "one_time";
   month: string; // 'YYYY-MM'
   monthLabel: string;
   billingDay: number;
@@ -313,12 +315,13 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
   // SELECT * on purpose: billing_email ships in db/schema.sql, and a database
   // that hasn't run it yet should still serve this page.
   const clients = await db.query<{
-    id: number; name: string; vip: boolean; billing_day: number;
-    retainer_amount: number; currency: string; start_date: string | null;
+    id: number; name: string; vip: boolean; engagement: string; billing_day: number;
+    retainer_amount: number; one_time_value: number; currency: string;
+    start_date: string | null;
     billing_email?: string | null; billing_cc?: string | null;
   }>(
     `SELECT * FROM foundery.clients
-     WHERE status = 'active' AND engagement = 'retainer'
+     WHERE status = 'active' AND engagement IN ('retainer', 'one_time')
      ORDER BY billing_day ASC, name ASC`,
   );
 
@@ -347,17 +350,28 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
   const out: BillingTask[] = [];
   for (const month of months) {
     for (const client of clients) {
-      // A retainer that hadn't started yet owes nothing for that month.
-      if (client.start_date && client.start_date.slice(0, 7) > month) continue;
-      const raiseOn = billingDateFor(month, client.billing_day);
+      const project = client.engagement === "one_time";
+
+      // A retainer bills every month it's live; a project bills once, in the
+      // month it kicks off — its raise date is the start date itself.
+      let raiseOn: string;
+      if (project) {
+        if (!client.start_date || client.start_date.slice(0, 7) !== month) continue;
+        raiseOn = client.start_date;
+      } else {
+        if (client.start_date && client.start_date.slice(0, 7) > month) continue;
+        raiseOn = billingDateFor(month, client.billing_day);
+      }
+
       const mark = marked.get(`${client.id}:${month}`) ?? null;
       out.push({
         clientId: client.id,
         clientName: client.name,
         vip: client.vip,
+        engagement: project ? "one_time" : "retainer",
         month,
         monthLabel: monthLabel(month),
-        billingDay: client.billing_day,
+        billingDay: Number(raiseOn.slice(8, 10)),
         raiseOn,
         days: daysUntil(raiseOn, today),
         raised: mark !== null,
@@ -366,12 +380,17 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
         paidAt: mark?.paid_at ? String(mark.paid_at).slice(0, 10) : null,
         billingEmail: client.billing_email ?? null,
         billingCc: client.billing_cc ?? null,
-        amount: clientValues ? client.retainer_amount : null,
+        amount: clientValues ? (project ? client.one_time_value : client.retainer_amount) : null,
         currency: client.currency,
       });
     }
   }
-  return out;
+  return out.sort(
+    (a, b) =>
+      a.month.localeCompare(b.month) ||
+      a.raiseOn.localeCompare(b.raiseOn) ||
+      a.clientName.localeCompare(b.clientName),
+  );
 }
 
 /**
@@ -420,13 +439,17 @@ export async function reminders(role: Role, today = todayISO()): Promise<Reminde
       });
     } else if (task.days <= 3) {
       // Surface this month's raises from three days ahead of the billing date.
+      const what = task.engagement === "one_time" ? "project invoice" : "retainer invoice";
       out.push({
         kind: "to_raise",
         title:
           task.days < 0
-            ? `${task.clientName}'s retainer invoice is ${Math.abs(task.days)} ${Math.abs(task.days) === 1 ? "day" : "days"} late going out`
-            : `Raise ${task.clientName}'s retainer invoice`,
-        detail: `Billing day ${task.billingDay} — not yet marked raised for ${task.monthLabel}.`,
+            ? `${task.clientName}'s ${what} is ${Math.abs(task.days)} ${Math.abs(task.days) === 1 ? "day" : "days"} late going out`
+            : `Raise ${task.clientName}'s ${what}`,
+        detail:
+          task.engagement === "one_time"
+            ? `The project kicks off ${task.raiseOn} — invoice not yet marked raised.`
+            : `Billing day ${task.billingDay} — not yet marked raised for ${task.monthLabel}.`,
         ...base,
       });
     }

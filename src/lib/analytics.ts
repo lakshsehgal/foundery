@@ -315,8 +315,8 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
     key: "unraised",
     title:
       unraised.length > 0
-        ? `${unraised.length} retainer invoice${unraised.length === 1 ? "" : "s"} not raised`
-        : "Every retainer is invoiced",
+        ? `${unraised.length} invoice${unraised.length === 1 ? "" : "s"} not raised`
+        : "Everything due is invoiced",
     detail:
       unraised.length > 0
         ? `${unraised.map((task) => task.clientName).join(", ")} — money nobody has been asked to pay yet.`

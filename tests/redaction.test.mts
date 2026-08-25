@@ -16,10 +16,11 @@ const [kidology] = await db.query<{ id: number }>(
    VALUES ('Kidology','kidology','active','retainer',true,'["UGC"]','185000','82000','2026-01-01',1,15,'green')
    RETURNING id`,
 );
-await db.query(
+const [nordwell] = await db.query<{ id: number }>(
   `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, one_time_value,
      delivery_cost, start_date, end_date, billing_day, terms_days, health)
-   VALUES ('Nordwell','nordwell','active','one_time',false,'["Web"]','300000','60000','2026-07-01','2026-09-30',1,15,'amber')`,
+   VALUES ('Nordwell','nordwell','active','one_time',false,'["Web"]','300000','60000','2026-07-01','2026-09-30',1,15,'amber')
+   RETURNING id`,
 );
 
 const salaries: [string, string, number][] = [
@@ -120,17 +121,22 @@ describe("clients: values follow the founder's switch", () => {
 });
 
 describe("billing tasks: raised in Zoho, ticked off here", () => {
-  test("an active retainer gets a task for last month and this month; a project gets none", async () => {
+  test("a retainer tasks every month; a project tasks once, in its start month", async () => {
     const tasks = await billingTasks("founder", TODAY);
     assert.deepEqual(
       tasks.map((task) => [task.clientName, task.month, task.raised]),
       [
         ["Kidology", "2026-07", false],
+        ["Nordwell", "2026-07", false],
         ["Kidology", "2026-08", false],
       ],
-      "Nordwell is a one-off project — its invoices are raised straight in Zoho",
+      "Nordwell started 1 July, so July carries its one project-invoice task",
     );
     assert.equal(tasks[0].raiseOn, "2026-07-01");
+    const project = tasks.find((task) => task.clientName === "Nordwell")!;
+    assert.equal(project.engagement, "one_time");
+    assert.equal(project.raiseOn, "2026-07-01", "a project's raise date is its start date");
+    assert.equal((await billingTasks("founder", TODAY)).filter((t) => t.clientName === "Nordwell").length, 1);
   });
 
   test("amounts follow the client-values switch; names and dates never hide", async () => {
@@ -139,7 +145,13 @@ describe("billing tasks: raised in Zoho, ticked off here", () => {
     assert.equal(task.clientName, "Kidology");
     assert.equal(task.billingDay, 1);
     await setSetting("operator_sees_client_values", "1");
-    assert.equal((await billingTasks("operator", TODAY))[0].amount, 185000);
+    const visible = await billingTasks("operator", TODAY);
+    assert.equal(visible[0].amount, 185000);
+    assert.equal(
+      visible.find((t) => t.clientName === "Nordwell")!.amount,
+      300000,
+      "a project task carries its total, not a monthly slice",
+    );
     await setSetting("operator_sees_client_values", "0");
   });
 
@@ -162,10 +174,11 @@ describe("reminders", () => {
     const feed = await reminders("founder", TODAY);
     assert.deepEqual(
       feed.map((item) => item.kind),
-      ["missed", "to_raise"],
+      ["missed", "missed", "to_raise"],
+      "Kidology and Nordwell both missed July; Kidology's August is late",
     );
     assert.ok(feed[0].title.includes("was never raised"));
-    assert.ok(feed[1].title.includes("late going out"));
+    assert.ok(feed[2].title.includes("late going out"));
   });
 
   test("marking the month raised clears its nudge", async () => {
@@ -175,13 +188,17 @@ describe("reminders", () => {
     );
     const feed = await reminders("founder", TODAY);
     assert.equal(feed.filter((item) => item.kind === "to_raise").length, 0);
-    assert.equal(feed.filter((item) => item.kind === "missed").length, 1, "July is still open");
+    assert.equal(feed.filter((item) => item.kind === "missed").length, 2, "July is still open");
   });
 
   test("marking the missed month empties the feed", async () => {
     await db.query(
       `INSERT INTO foundery.raised_invoices (client_id, month, raised_by) VALUES ($1, '2026-07', 'founder')`,
       [kidology.id],
+    );
+    await db.query(
+      `INSERT INTO foundery.raised_invoices (client_id, month, raised_by) VALUES ($1, '2026-07', 'founder')`,
+      [nordwell.id],
     );
     assert.deepEqual(await reminders("founder", TODAY), []);
     const tasks = await billingTasks("founder", TODAY);
