@@ -3,7 +3,9 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { COOKIE_NAME, issueToken, roleForPasscode, type Role } from "@/lib/auth";
-import { anonSupabase, identityConfigured, roleForEmail } from "@/lib/identity";
+import { teamRoleForEmail } from "@/lib/identity";
+import { createLoginCode, consumeLoginCode } from "@/lib/login-codes";
+import { getResendConfig, loginCodeEmail, sendEmail } from "@/lib/resend";
 import { logAudit } from "@/lib/db";
 
 export type LoginState = { error?: string };
@@ -52,53 +54,58 @@ export async function grantSession(role: Role) {
 export type OtpState = { error?: string; sentTo?: string };
 
 /**
- * Step 1 of the email flow: a 6-digit code, sent only to an email that is on
- * a list. Checking the list BEFORE sending matters twice over — a stranger's
- * address never receives mail from us, and the failure is honest ("this
- * email isn't on the team") instead of a code that can never work.
+ * Step 1 of the email flow: a 6-digit code, generated and stored by Foundery
+ * and delivered by Resend — the email contains the code itself, never a
+ * link, so there is no redirect chain to break. The team list is checked
+ * BEFORE sending: a stranger's address never receives mail, and the failure
+ * is honest ("this email isn't on the team") instead of a dead code.
  */
 export async function sendLoginCode(_prev: OtpState, form: FormData): Promise<OtpState> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   if (!email || !email.includes("@")) return { error: "Enter your email address." };
-  if (!identityConfigured()) return { error: "Sign-in isn't configured on this deployment." };
 
-  if (!roleForEmail(email)) {
+  if (!(await teamRoleForEmail(email))) {
     await logAudit("public", "sign_in_denied", "email", undefined, email);
     return { error: "That email isn't on the team. Ask the founder to add you in the settings." };
   }
 
-  const { error } = await anonSupabase().auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: true },
-  });
-  if (error) return { error: `Couldn't send the code: ${error.message}` };
+  const resend = await getResendConfig();
+  if (!resend) {
+    return {
+      error:
+        "Email codes aren't set up yet — the founder needs to add the Resend API key (Settings → Email, or RESEND_API_KEY in Vercel).",
+    };
+  }
+
+  const created = await createLoginCode(email);
+  if ("error" in created) return { error: created.error };
+
+  const message = loginCodeEmail(created.code);
+  const delivery = await sendEmail(resend, email, message.subject, message.html);
+  if (!delivery.ok) return { error: `Couldn't send the code: ${delivery.error}` };
 
   return { sentTo: email };
 }
 
-/** Step 2: the code comes back, Supabase verifies it, the role cookie is minted. */
+/** Step 2: the code comes back, Foundery verifies it, the role cookie is minted. */
 export async function verifyLoginCode(_prev: OtpState, form: FormData): Promise<OtpState> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const code = String(form.get("code") ?? "").trim();
   if (!code) return { sentTo: email, error: "Enter the 6-digit code from the email." };
 
-  const { data, error } = await anonSupabase().auth.verifyOtp({
-    email,
-    token: code,
-    type: "email",
-  });
-  if (error || !data.user?.email) {
-    return { sentTo: email, error: "That code didn't match — check it, or request a fresh one." };
+  const verified = await consumeLoginCode(email, code);
+  if (!verified) {
+    return { sentTo: email, error: "That code didn't match or has expired — request a fresh one." };
   }
 
-  // The role decision uses the email Supabase verified, never the form's.
-  const role = roleForEmail(data.user.email);
+  // Owning the inbox is the proof; the role comes from the team list.
+  const role = await teamRoleForEmail(email);
   if (!role) {
-    await logAudit("public", "sign_in_denied", "email", undefined, data.user.email);
+    await logAudit("public", "sign_in_denied", "email", undefined, email);
     return { error: "That email isn't on the team." };
   }
 
   await grantSession(role);
-  await logAudit(role, "sign_in", "method", undefined, "email_otp");
+  await logAudit(role, "sign_in", "method", undefined, "email_code");
   redirect("/");
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { grantSession } from "@/app/actions/auth";
-import { roleForEmail, supabaseAnonKey, supabaseUrl } from "@/lib/identity";
+import { supabaseAnonKey, supabaseUrl, teamRoleForEmail } from "@/lib/identity";
 import { logAudit } from "@/lib/db";
 
 /**
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=google-failed", request.url));
   }
 
-  const role = roleForEmail(email);
+  const role = await teamRoleForEmail(email);
   await supabase.auth.signOut({ scope: "local" }).catch(() => {});
 
   if (!role) {

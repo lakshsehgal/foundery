@@ -6,6 +6,10 @@ import { defaultCurrency, symbolFor } from "@/lib/money";
 import { Card, CardTitle, PageBody, PageHeader, TableWrap, Td, Th } from "@/components/ui/primitives";
 import { BusinessForm, VisibilityForm } from "./settings-forms";
 import { ZohoConnectCard } from "./zoho-connect";
+import { TeamCard } from "./team-card";
+import { ResendCard } from "./resend-card";
+import { listTeam } from "@/app/actions/team";
+import { getResendConfig } from "@/lib/resend";
 import { ZohoMatchCard, type MatchCustomer } from "./zoho-match";
 import { customersFromInvoices, fetchZohoInvoices, getZohoConfig } from "@/lib/zoho";
 import { clientOptions, listClients } from "@/lib/queries";
@@ -57,7 +61,8 @@ export default async function SettingsPage() {
   const currency = defaultCurrency();
   const db = await getDb();
 
-  const [storedSwitches, audit, businessName, cashBuffer, zohoConfig] = await Promise.all([
+  const [storedSwitches, audit, businessName, cashBuffer, zohoConfig, team, resendConfig] =
+    await Promise.all([
     readOperatorSwitches(),
     db.query<{
       ts: string; actor: string; action: string; entity: string | null; detail: string | null;
@@ -68,7 +73,12 @@ export default async function SettingsPage() {
     getSetting("business_name", "Neuroid Media"),
     getSetting("cash_buffer", ""),
     getZohoConfig(),
+    listTeam(),
+    getResendConfig(),
   ]);
+
+  const bootstrapFounder = (process.env.FOUNDERY_FOUNDER_EMAILS || "laksh@neuroidmedia.com")
+    .split(/[,\s]+/)[0];
 
   const stored = new Map(storedSwitches.map((row) => [row.key, row.value]));
   const switches = OPERATOR_SWITCHES.map((definition) => ({
@@ -82,6 +92,10 @@ export default async function SettingsPage() {
     <>
       <PageHeader title="Settings" subtitle="Visibility, the business, and who did what" />
       <PageBody>
+        <TeamCard members={team} bootstrapFounder={bootstrapFounder} />
+
+        <ResendCard connected={resendConfig !== null} founderEmail={bootstrapFounder} />
+
         <VisibilityForm switches={switches} currencySymbol={symbolFor(currency)} />
 
         <BusinessForm
@@ -139,23 +153,6 @@ export default async function SettingsPage() {
               </tbody>
             </TableWrap>
           )}
-        </Card>
-
-        <Card>
-          <CardTitle title="Who can sign in" hint="Configured in the environment, not the database." />
-          <p className="text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">
-            Sign-in is passwordless — Google, or a code emailed to you. Who gets in is two lists of
-            emails in the deployment&apos;s environment variables:{" "}
-            <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
-              FOUNDERY_FOUNDER_EMAILS
-            </code>{" "}
-            and{" "}
-            <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
-              FOUNDERY_OPERATOR_EMAILS
-            </code>{" "}
-            (comma-separated). An email on neither list is turned away by name. Keeping the lists
-            outside the app means nobody can grant themselves access from inside it.
-          </p>
         </Card>
 
         <Card>

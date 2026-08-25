@@ -97,3 +97,51 @@ describe("email allowlists", () => {
     delete process.env.FOUNDERY_OPERATOR_EMAILS;
   });
 });
+
+describe("own login codes", () => {
+  test("a code round-trips once, then dies", async () => {
+    const { createLoginCode, consumeLoginCode } = await import("../src/lib/login-codes");
+
+    const created = await createLoginCode("boss@x.com");
+    assert.ok("code" in created, "code created");
+    const code = (created as { code: string }).code;
+    assert.match(code, /^\d{6}$/);
+
+    assert.equal(await consumeLoginCode("boss@x.com", "999999"), false, "wrong code fails");
+    assert.equal(await consumeLoginCode("boss@x.com", code), true, "right code passes");
+    assert.equal(await consumeLoginCode("boss@x.com", code), false, "single use");
+  });
+
+  test("sends are rate-limited per email", async () => {
+    const { createLoginCode } = await import("../src/lib/login-codes");
+    await createLoginCode("busy@x.com");
+    await createLoginCode("busy@x.com");
+    const third = await createLoginCode("busy@x.com");
+    assert.ok("code" in third, "three sends allowed");
+    const fourth = await createLoginCode("busy@x.com");
+    assert.ok("error" in fourth, "fourth send within the window refused");
+  });
+});
+
+describe("team table roles", () => {
+  test("the table wins, the environment remains the floor", async () => {
+    const { teamRoleForEmail } = await import("../src/lib/identity");
+    const { getDb } = await import("../src/lib/db");
+    const db = await getDb();
+
+    delete process.env.FOUNDERY_FOUNDER_EMAILS;
+    delete process.env.FOUNDERY_OPERATOR_EMAILS;
+
+    assert.equal(await teamRoleForEmail("laksh@neuroidmedia.com"), "founder", "env default");
+    assert.equal(await teamRoleForEmail("newops@x.com"), null);
+
+    await db.query(
+      `INSERT INTO foundery.team_members (email, role) VALUES ('newops@x.com', 'operator')`,
+    );
+    assert.equal(await teamRoleForEmail("NewOps@X.com"), "operator", "db row, case-insensitive");
+    assert.equal(await teamRoleForEmail("laksh@neuroidmedia.com"), "founder", "default still works");
+
+    await db.query(`DELETE FROM foundery.team_members WHERE email = 'newops@x.com'`);
+    assert.equal(await teamRoleForEmail("newops@x.com"), null, "removal takes effect");
+  });
+});

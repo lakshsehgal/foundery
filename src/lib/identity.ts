@@ -48,9 +48,9 @@ function parseList(raw: string | undefined): string[] {
 }
 
 /**
- * The role a verified email carries, or null for "not yours to enter".
+ * The role a verified email carries, from the environment lists only.
  * The founder's own address is the default so the very first deploy is
- * enterable before any list is configured.
+ * enterable before anything is configured.
  */
 export function roleForEmail(email: string): Role | null {
   const normalized = email.trim().toLowerCase();
@@ -59,4 +59,27 @@ export function roleForEmail(email: string): Role | null {
   if (founders.includes(normalized)) return "founder";
   if (operators.includes(normalized)) return "operator";
   return null;
+}
+
+/**
+ * The full answer: the team table managed on /settings first, the
+ * environment lists as the bootstrap fallback beneath it. The fallback is
+ * what makes lock-out impossible — an empty or missing table still lets the
+ * founder in through the environment default.
+ */
+export async function teamRoleForEmail(email: string): Promise<Role | null> {
+  const normalized = email.trim().toLowerCase();
+  try {
+    const { getDb } = await import("./db");
+    const db = await getDb();
+    const rows = await db.query<{ role: string }>(
+      `SELECT role FROM foundery.team_members WHERE lower(email) = $1`,
+      [normalized],
+    );
+    const role = rows[0]?.role;
+    if (role === "founder" || role === "operator") return role;
+  } catch {
+    // Table not created yet — the environment fallback below still answers.
+  }
+  return roleForEmail(normalized);
 }

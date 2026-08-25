@@ -178,24 +178,27 @@ checklist instructions include your actual IDs.
 
 ## Sign-in
 
-Passwordless, two ways, both through Supabase Auth: **Continue with Google**,
-or a **6-digit code emailed** to you. Who gets in is two comma-separated
-email lists in the environment — `FOUNDERY_FOUNDER_EMAILS` and
-`FOUNDERY_OPERATOR_EMAILS` — checked *before* any code is sent; an address on
-neither list is turned away by name and never receives mail. After identity
-is verified, Foundery mints its own signed 12-hour role cookie, so the
-role/redaction layer is identical in both sign-in worlds.
+Passwordless, two ways: **Continue with Google** (through Supabase Auth), or
+a **6-digit code emailed** to you — generated and verified by Foundery
+itself and delivered by **Resend**, so the email contains the code and never
+a link. Who gets in is managed on the **Team card** (Settings): add or
+remove founder/operator emails from the dashboard. The environment lists
+(`FOUNDERY_FOUNDER_EMAILS`, default the founder's address) remain the floor
+beneath the table, so the founder can never be locked out. The list is
+checked *before* any code is sent — a stranger's address never receives
+mail. After identity is verified, Foundery mints its own signed 12-hour role
+cookie, so the role/redaction layer is identical across every sign-in path.
 
-Google needs one-time setup: Supabase dashboard → Authentication → Providers
-→ Google, with an OAuth client from Google Cloud Console (authorised redirect
-URI: `https://<project-ref>.supabase.co/auth/v1/callback`). Email codes work
-out of the box, with one caveat: Supabase's built-in mailer only delivers to
-the project's own team members until you configure custom SMTP (Settings →
-Authentication → SMTP) — add your operator to the Supabase project team, or
-set up SMTP, or have them use Google.
+Resend setup is one card: paste an API key from resend.com, optionally a
+from-address on a domain you've verified there (until then, Resend's test
+sender delivers only to your own inbox). Google needs one-time setup in
+Supabase: Authentication → Providers → Google, with an OAuth client from
+Google Cloud Console (redirect URI
+`https://<project-ref>.supabase.co/auth/v1/callback`).
 
-Local development, with no Supabase configured, falls back to the passcode
-form automatically.
+Local development, with neither configured, falls back to the passcode form;
+`/login?method=passcode` reaches it anywhere passcodes are set in the
+environment.
 
 ## Zoho Books sync
 

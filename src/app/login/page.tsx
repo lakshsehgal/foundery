@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { currentRole } from "@/lib/auth";
 import { identityConfigured } from "@/lib/identity";
+import { getResendConfig } from "@/lib/resend";
 import { Logo } from "@/components/ui/primitives";
 import { LoginForm } from "./login-form";
 import { OtpLoginForm } from "./otp-form";
@@ -17,13 +18,20 @@ const PROMISES: [string, string][] = [
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; method?: string }>;
 }) {
   if (await currentRole()) redirect("/");
-  const { error } = await searchParams;
-  // Passwordless when Supabase is wired up; the passcode form only survives
-  // as the local-dev fallback where there is no Supabase to verify against.
-  const passwordless = identityConfigured();
+  const { error, method } = await searchParams;
+
+  // Google needs Supabase; email codes need Resend; the passcode form is the
+  // fallback for local dev and the founder's explicit escape hatch elsewhere.
+  const googleAvailable = identityConfigured();
+  const emailAvailable = (await getResendConfig()) !== null;
+  const passcodeAvailable = Boolean(
+    process.env.FOUNDERY_FOUNDER_PASSCODE || process.env.FOUNDERY_OPERATOR_PASSCODE,
+  );
+  const passwordless =
+    (googleAvailable || emailAvailable) && method !== "passcode";
 
   return (
     <main className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
@@ -89,7 +97,16 @@ export default async function LoginPage({
           <div className="mb-10 lg:hidden">
             <Logo size={28} />
           </div>
-          {passwordless ? <OtpLoginForm googleError={error} /> : <LoginForm />}
+          {passwordless ? (
+            <OtpLoginForm
+              googleError={error}
+              googleAvailable={googleAvailable}
+              emailAvailable={emailAvailable}
+              passcodeAvailable={passcodeAvailable}
+            />
+          ) : (
+            <LoginForm />
+          )}
         </div>
       </section>
     </main>

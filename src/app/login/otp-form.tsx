@@ -24,7 +24,14 @@ function GoogleMark() {
   );
 }
 
-export function OtpLoginForm({ googleError }: { googleError?: string }) {
+export function OtpLoginForm({
+  googleError, googleAvailable, emailAvailable, passcodeAvailable,
+}: {
+  googleError?: string;
+  googleAvailable: boolean;
+  emailAvailable: boolean;
+  passcodeAvailable: boolean;
+}) {
   const [sendState, sendAction, sending] = useActionState<OtpState, FormData>(sendLoginCode, {});
   const [verifyState, verifyAction, verifying] = useActionState<OtpState, FormData>(verifyLoginCode, {});
 
@@ -39,23 +46,32 @@ export function OtpLoginForm({ googleError }: { googleError?: string }) {
         No passwords here — your email is the key. What you see inside is decided by who you are.
       </p>
 
-      <a
-        href="/auth/google"
-        className="mt-7 flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3.5 py-2.5 text-[13.5px] font-medium shadow-[0_1px_2px_rgb(16_24_40/0.04)] transition-colors hover:bg-[var(--color-surface-2)]"
-      >
-        <GoogleMark />
-        Continue with Google
-      </a>
+      {googleAvailable && (
+        <a
+          href="/auth/google"
+          className="mt-7 flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3.5 py-2.5 text-[13.5px] font-medium shadow-[0_1px_2px_rgb(16_24_40/0.04)] transition-colors hover:bg-[var(--color-surface-2)]"
+        >
+          <GoogleMark />
+          Continue with Google
+        </a>
+      )}
 
-      <div className="my-6 flex items-center gap-3">
-        <span className="h-px flex-1 bg-[var(--color-line)]" />
-        <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
-          or email me a code
-        </span>
-        <span className="h-px flex-1 bg-[var(--color-line)]" />
-      </div>
+      {googleAvailable && emailAvailable && (
+        <div className="my-6 flex items-center gap-3">
+          <span className="h-px flex-1 bg-[var(--color-line)]" />
+          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+            or email me a code
+          </span>
+          <span className="h-px flex-1 bg-[var(--color-line)]" />
+        </div>
+      )}
 
-      {!sentTo ? (
+      {!emailAvailable ? (
+        <p className={`${googleAvailable ? "" : "mt-7 "}rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--color-ink-2)]`}>
+          Email codes aren&apos;t set up yet — the founder adds a Resend API key under Settings →
+          Email to switch them on.
+        </p>
+      ) : !sentTo ? (
         <form action={sendAction}>
           <Field label="Work email" htmlFor="email">
             <TextInput
@@ -113,6 +129,16 @@ export function OtpLoginForm({ googleError }: { googleError?: string }) {
         Only emails the founder has put on the team list can get in — founder and operator each see
         their own view. Sessions last 12 hours.
       </p>
+
+      {passcodeAvailable && (
+        <p className="mt-3 text-[11.5px] text-[var(--color-ink-3)]">
+          Stuck?{" "}
+          <a href="/login?method=passcode" className="underline underline-offset-4">
+            Sign in with a passcode instead
+          </a>
+          .
+        </p>
+      )}
     </div>
   );
 }

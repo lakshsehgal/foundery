@@ -136,6 +136,29 @@ create table if not exists foundery.onboardings (
 );
 create index if not exists idx_onboardings_client on foundery.onboardings(client_id);
 
+-- Who can sign in, managed from the dashboard. The environment allowlists
+-- remain the bootstrap fallback, so the very first login works with an empty
+-- table and the founder can never lock themself out.
+create table if not exists foundery.team_members (
+  id       bigint generated always as identity primary key,
+  email    text not null unique,
+  role     text not null default 'operator',   -- founder | operator
+  added_by text,
+  added_at timestamptz not null default now()
+);
+
+-- One-time login codes, stored hashed. A code lives ten minutes, dies on
+-- success or after five wrong attempts, and sends are rate-limited per email.
+create table if not exists foundery.login_codes (
+  id         bigint generated always as identity primary key,
+  email      text not null,
+  code_hash  text not null,
+  expires_at timestamptz not null,
+  attempts   integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_login_codes_email on foundery.login_codes(email);
+
 create table if not exists foundery.settings (
   key   text primary key,
   value text not null
@@ -161,4 +184,6 @@ alter table foundery.onboarding_submissions enable row level security;
 alter table foundery.pnl_months             enable row level security;
 alter table foundery.settings               enable row level security;
 alter table foundery.onboardings            enable row level security;
+alter table foundery.team_members           enable row level security;
+alter table foundery.login_codes            enable row level security;
 alter table foundery.audit_log              enable row level security;
