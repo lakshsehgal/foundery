@@ -189,61 +189,122 @@ export const ONBOARDING_DETAIL_FIELDS = [
 ] as const satisfies readonly OnboardingField[];
 
 /**
- * Step 2: the accesses we need before delivery can start. Each item carries
- * the instruction the client sees; `settingKey` names a settings row that,
- * when filled in on /settings, gets appended to the instruction (our BM id,
- * collaborator code, and so on).
+ * Step 2: the accesses we need before delivery can start, grouped by
+ * platform. Each group can carry one configurable value — our BM ID, the
+ * Google admin email — read from settings with Neuroid's own as the default;
+ * "{value}" in a hint or banner is replaced with it server-side.
  */
 export type AccessItem = {
   key: string;
   label: string;
   hint: string;
-  settingKey?: string;
-  settingLabel?: string;
 };
 
-export const ACCESS_ITEMS: AccessItem[] = [
+export type AccessGroup = {
+  key: string;
+  label: string;
+  /** Settings row that personalises this group; the default is Neuroid's own. */
+  settingKey?: string;
+  settingDefault?: string;
+  /** A copyable ID card shown before the items — the value is the group's. */
+  highlight?: { title: string; text: string };
+  /** A tinted note above the items. */
+  banner?: { text: string; tone: "info" | "good" };
+  items: AccessItem[];
+};
+
+export const ACCESS_GROUPS: AccessGroup[] = [
   {
-    key: "meta_bm",
-    label: "Meta Business Manager — partner access",
-    hint: "Business settings → Partners → Add → Give a partner access to your assets.",
+    key: "meta",
+    label: "Meta (Facebook & Instagram)",
     settingKey: "neuroid_meta_bm_id",
-    settingLabel: "Our Business Manager ID",
+    settingDefault: "1100898224148253",
+    highlight: {
+      title: "Our Business Manager ID",
+      text: "Please share access to your ad account, Facebook page, Instagram page, catalogues & pixel to our BM:",
+    },
+    items: [
+      {
+        key: "meta_ad_account",
+        label: "Ad Account Access",
+        hint: "Share your ad account access to our BM ID: {value}",
+      },
+      {
+        key: "meta_pages",
+        label: "Facebook & Instagram Page Access",
+        hint: "Share your Facebook Page and Instagram Page access to our BM ID: {value}",
+      },
+      {
+        key: "meta_catalogue",
+        label: "Catalogue Access",
+        hint: "Share your product catalogue access to our BM ID: {value}",
+      },
+      {
+        key: "meta_pixel",
+        label: "Pixel Access",
+        hint: "Share your Meta Pixel access to our BM ID: {value}",
+      },
+    ],
   },
   {
-    key: "meta_ad_account",
-    label: "Meta ad account",
-    hint: "Share the ad account to our Business Manager with Manage access.",
+    key: "google",
+    label: "Google",
+    settingKey: "neuroid_google_admin",
+    settingDefault: "admin@neuroidmedia.com",
+    banner: { text: "For GA4, GTM & GMC: Please add {value} as an Admin user.", tone: "info" },
+    items: [
+      {
+        key: "google_ads",
+        label: "Google Ads — Accept Partner Request",
+        hint: "We'll send a partner link request to your Google Ads account. Please accept it when you receive it.",
+      },
+      {
+        key: "ga4",
+        label: "Google Analytics (GA4) Access",
+        hint: "Add {value} as an Admin user in your GA4 property",
+      },
+      {
+        key: "gtm",
+        label: "Google Tag Manager (GTM) Access",
+        hint: "Add {value} as a user with Admin access in GTM",
+      },
+    ],
   },
   {
     key: "shopify",
-    label: "Shopify — collaborator access",
-    hint: "Settings → Users and permissions → Collaborators.",
-    settingKey: "neuroid_shopify_collab",
-    settingLabel: "Our collaborator request code",
+    label: "Shopify",
+    banner: {
+      text: "Thank you for sharing your collaborator code! Our onboarding manager will send a collaborator request to your Shopify store. Just accept it when it arrives.",
+      tone: "good",
+    },
+    items: [
+      {
+        key: "shopify",
+        label: "Shopify — Accept Collaborator Request",
+        hint: "Our onboarding manager will send a collaborator request to access your Shopify store backend. Please accept it when you receive it.",
+      },
+    ],
   },
   {
-    key: "google_ads",
-    label: "Google Ads account",
-    hint: "We'll send a link request from our manager account — accept it under Access and security.",
-    settingKey: "neuroid_google_mcc",
-    settingLabel: "Our manager (MCC) ID",
-  },
-  {
-    key: "gmc",
-    label: "Google Merchant Center",
-    hint: "Settings → People and access → add us with Standard access.",
-    settingKey: "neuroid_gmc_email",
-    settingLabel: "The email to invite",
-  },
-  {
-    key: "ga4",
-    label: "Google Analytics (GA4)",
-    hint: "Admin → Property access management → add us as Analyst or above.",
-    settingKey: "neuroid_ga_email",
-    settingLabel: "The email to invite",
+    key: "other",
+    label: "Other Platforms",
+    settingKey: "neuroid_google_admin",
+    settingDefault: "admin@neuroidmedia.com",
+    items: [
+      {
+        key: "gmc",
+        label: "Google Merchant Centre (GMC) Access",
+        hint: "Add {value} as an Admin user in your Google Merchant Centre",
+      },
+    ],
   },
 ];
+
+/** The flat checklist — saving, completion and the internal views read this. */
+export const ACCESS_ITEMS: AccessItem[] = ACCESS_GROUPS.flatMap((group) => group.items);
+
+/** Free-text extras live in the same jsonb under a key no checkbox can claim. */
+export const ACCESS_NOTES_KEY = "_notes";
 
 export type OnboardingStatus = "invited" | "details_done" | "completed";
 

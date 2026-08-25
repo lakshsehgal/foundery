@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
 import { getDb, logAudit, named } from "@/lib/db";
 import {
-  ACCESS_ITEMS, FIELD_TYPES, ONBOARDING_DETAIL_FIELDS, type OnboardingField,
+  ACCESS_ITEMS, ACCESS_NOTES_KEY, FIELD_TYPES, ONBOARDING_DETAIL_FIELDS, type OnboardingField,
 } from "@/lib/taxonomy";
 import { getFormByToken, getGuidedByToken, publicWelcomeUrl } from "@/lib/queries";
 import type { ActionState } from "./clients";
@@ -257,10 +257,10 @@ export async function saveWelcomeAccess(
 
   const access: Record<string, { done: boolean; note?: string }> = {};
   for (const item of ACCESS_ITEMS) {
-    const done = form.get(`done_${item.key}`) !== null;
-    const note = String(form.get(`note_${item.key}`) ?? "").trim().slice(0, 500);
-    access[item.key] = note ? { done, note } : { done };
+    access[item.key] = { done: form.get(`done_${item.key}`) !== null };
   }
+  const notes = String(form.get("access_notes") ?? "").trim().slice(0, 1000);
+  if (notes) access[ACCESS_NOTES_KEY] = { done: false, note: notes };
   const allDone = ACCESS_ITEMS.every((item) => access[item.key]?.done);
 
   const db = await getDb();

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Check, ChevronDown, Copy, ExternalLink } from "lucide-react";
 import { Card, Chip, SectionLabel } from "@/components/ui/primitives";
 import {
-  ACCESS_ITEMS, ONBOARDING_DETAIL_FIELDS, ONBOARDING_STATUS,
+  ACCESS_ITEMS, ACCESS_NOTES_KEY, ONBOARDING_DETAIL_FIELDS, ONBOARDING_STATUS,
 } from "@/lib/taxonomy";
 import type { GuidedOnboarding } from "@/lib/queries";
 
@@ -146,6 +146,12 @@ export function GuidedList({
                         );
                       })}
                     </ul>
+                    {onboarding.access[ACCESS_NOTES_KEY]?.note && (
+                      <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink-2)]">
+                        <span className="font-semibold">Their notes: </span>
+                        {onboarding.access[ACCESS_NOTES_KEY].note}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

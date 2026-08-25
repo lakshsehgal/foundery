@@ -161,13 +161,12 @@ export default async function SettingsPage() {
             hint="Shown to clients inside the onboarding checklist, so they grant access to the right accounts. Leave blank to show generic instructions."
           />
           <p className="text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">
-            Business Manager ID, Shopify collaborator code, Google MCC ID and the Google emails to
-            invite are read from settings keys{" "}
+            The Meta Business Manager ID and the Google admin email are read from settings keys{" "}
             <code className="rounded-[var(--radius-xs)] bg-[var(--color-surface-3)] px-1 py-0.5 font-mono text-[11.5px]">
-              neuroid_meta_bm_id · neuroid_shopify_collab · neuroid_google_mcc · neuroid_gmc_email ·
-              neuroid_ga_email
+              neuroid_meta_bm_id · neuroid_google_admin
             </code>
-            . Ask Claude to set them, or insert them into the settings table directly.
+            . When unset, the checklist uses Neuroid&apos;s defaults — BM 1100898224148253 and
+            admin@neuroidmedia.com.
           </p>
         </Card>
       </PageBody>

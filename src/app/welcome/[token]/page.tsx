@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getGuidedByToken } from "@/lib/queries";
 import { getSettings } from "@/lib/db";
-import { ACCESS_ITEMS } from "@/lib/taxonomy";
+import { ACCESS_GROUPS } from "@/lib/taxonomy";
 import { Logo } from "@/components/ui/primitives";
-import { AccessStep, DetailsStep, DoneCard } from "./welcome-flow";
+import { AccessStep, DetailsStep, DoneCard, type ResolvedAccessGroup } from "./welcome-flow";
 
 export const dynamic = "force-dynamic";
 
@@ -24,17 +24,25 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
   const onboarding = await getGuidedByToken(token);
   if (!onboarding) notFound();
 
-  // Fold Neuroid's own IDs (set on /settings) into each instruction, so the
-  // client sees "add partner → Business Manager ID 1234" rather than a hunt.
+  // Fold Neuroid's own IDs into every hint and banner, so the client sees
+  // "share to our BM ID: 1100…" rather than a hunt. Settings override the
+  // built-in defaults per group.
   const settings = await getSettings();
-  const items = ACCESS_ITEMS.map((item) => {
-    const configured = item.settingKey ? settings.get(item.settingKey) : undefined;
+  const groups: ResolvedAccessGroup[] = ACCESS_GROUPS.map((group) => {
+    const value = group.settingKey
+      ? settings.get(group.settingKey) || group.settingDefault || ""
+      : "";
     return {
-      ...item,
-      instruction:
-        configured && item.settingLabel
-          ? `${item.hint} ${item.settingLabel}: ${configured}`
-          : item.hint,
+      key: group.key,
+      label: group.label,
+      value,
+      highlight: group.highlight ?? null,
+      banner: group.banner ?? null,
+      items: group.items.map((item) => ({
+        key: item.key,
+        label: item.label,
+        instruction: item.hint.replaceAll("{value}", value),
+      })),
     };
   });
 
@@ -101,7 +109,7 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
               {stepIndex === 0 ? (
                 <DetailsStep onboarding={onboarding} />
               ) : (
-                <AccessStep onboarding={onboarding} items={items} />
+                <AccessStep onboarding={onboarding} groups={groups} />
               )}
             </div>
           )}
