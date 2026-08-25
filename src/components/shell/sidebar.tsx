@@ -67,7 +67,7 @@ function writePref(key: string, value: string) {
   window.dispatchEvent(new Event(PREFS_EVENT));
 }
 
-export function Sidebar({ role }: { role: Role }) {
+export function Sidebar({ role, email }: { role: Role; email: string | null }) {
   const pathname = usePathname();
 
   const collapsed = useSyncExternalStore(
@@ -115,8 +115,11 @@ export function Sidebar({ role }: { role: Role }) {
           className={`mx-auto h-6 w-6 rounded-[var(--radius-xs)] ${collapsed ? "" : "lg:hidden"}`}
           style={{ background: "var(--color-brand)" }}
         />
-        <span className={block}>
+        <span className={`${block} items-baseline gap-2`}>
           <Logo size={22} />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-ink-3)]">
+            Cortex
+          </span>
         </span>
       </div>
 
@@ -152,18 +155,26 @@ export function Sidebar({ role }: { role: Role }) {
       </ul>
 
       <div className="mt-auto border-t border-[var(--color-line)] p-2.5">
+        {/* Profile: who this session belongs to, and as what. */}
         <div
+          title={email ?? "Signed in with a passcode"}
           className={`mb-2 ${block} items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-2.5 py-2`}
         >
           <span
             aria-hidden
-            className="h-6 w-6 shrink-0 rounded-full"
-            style={{ background: role === "founder" ? "var(--color-brand)" : "var(--color-surface-3)" }}
-          />
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+            style={
+              role === "founder"
+                ? { background: "var(--color-brand)", color: "var(--color-brand-ink)" }
+                : { background: "var(--color-surface-3)", color: "var(--color-ink-2)" }
+            }
+          >
+            {(email ?? role).charAt(0).toUpperCase()}
+          </span>
           <div className="min-w-0">
-            <p className="truncate text-[12px] font-medium capitalize">{role}</p>
-            <p className="truncate text-[10.5px] text-[var(--color-ink-3)]">
-              {role === "founder" ? "Sees everything" : "Day-to-day view"}
+            <p className="truncate text-[12px] font-medium">{email ?? "Passcode session"}</p>
+            <p className="truncate text-[10.5px] capitalize text-[var(--color-ink-3)]">
+              {role} · {role === "founder" ? "sees everything" : "day-to-day view"}
             </p>
           </div>
         </div>

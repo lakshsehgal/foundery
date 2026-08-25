@@ -32,24 +32,57 @@ export function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-export function issueToken(role: Role, now = Date.now()): string {
-  const payload = `${role}.${now + SESSION_TTL_MS}`;
+export type Session = {
+  role: Role;
+  /** Who signed in, when identity is known. Passcode sessions have none. */
+  email: string | null;
+};
+
+/**
+ * Tokens carry role + optional email: `role.email64.expiry.mac`. The email is
+ * base64url so dots in an address can't smuggle extra token segments, and the
+ * signature covers all of it, so neither role nor identity can be edited.
+ */
+export function issueSession(role: Role, email: string | null, now = Date.now()): string {
+  const email64 = Buffer.from(email ?? "").toString("base64url");
+  const payload = `${role}.${email64}.${now + SESSION_TTL_MS}`;
   return `${payload}.${sign(payload)}`;
 }
 
-/** The role a token proves, or null if it proves nothing. */
-export function verifyToken(token: string | undefined, now = Date.now()): Role | null {
+export function issueToken(role: Role, now = Date.now()): string {
+  return issueSession(role, null, now);
+}
+
+/** The session a token proves, or null if it proves nothing. */
+export function verifySession(token: string | undefined, now = Date.now()): Session | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [role, expiry, mac] = parts;
 
-  // The signature covers the role, so a token can't be edited into a
-  // higher-privilege one without the secret.
-  if (!safeEqual(sign(`${role}.${expiry}`), mac)) return null;
+  // Legacy three-part tokens (no email) stay valid until they expire, so a
+  // deploy doesn't sign everyone out mid-day.
+  const [role, email64, expiry, mac] =
+    parts.length === 4 ? parts : parts.length === 3 ? [parts[0], "", parts[1], parts[2]] : [];
+  if (mac === undefined) return null;
+
+  const payload = parts.length === 4 ? `${role}.${email64}.${expiry}` : `${role}.${expiry}`;
+  if (!safeEqual(sign(payload), mac)) return null;
   if (!/^\d+$/.test(expiry) || Number(expiry) < now) return null;
   if (role !== "founder" && role !== "operator") return null;
-  return role;
+
+  let email: string | null = null;
+  if (email64) {
+    try {
+      const decoded = Buffer.from(email64, "base64url").toString("utf8");
+      email = decoded || null;
+    } catch {
+      return null;
+    }
+  }
+  return { role, email };
+}
+
+export function verifyToken(token: string | undefined, now = Date.now()): Role | null {
+  return verifySession(token, now)?.role ?? null;
 }
 
 /** Which passcode, if any, matches. Founder is checked first. */

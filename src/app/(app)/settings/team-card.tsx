@@ -53,8 +53,8 @@ export function TeamCard({
   return (
     <Card>
       <CardTitle
-        title="Team"
-        hint="Who can sign in, and as what. Founder sees everything; operator gets the day-to-day view. Changes apply on their next sign-in."
+        title="Users & access"
+        hint="Who can sign in, and as which of the two roles: founder sees everything including money and analytics; operator runs the day-to-day with values hidden unless you switch them on below. Changes apply on their next sign-in."
       />
 
       <ul className="mb-4 space-y-1.5">

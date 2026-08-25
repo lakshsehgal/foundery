@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=not-on-team", request.url));
   }
 
-  await grantSession(role);
+  await grantSession(role, email);
   await logAudit(role, "sign_in", "method", undefined, "google");
   return NextResponse.redirect(new URL("/", request.url));
 }

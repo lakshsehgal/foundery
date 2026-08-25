@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { COOKIE_NAME, issueToken, roleForPasscode, type Role } from "@/lib/auth";
+import { COOKIE_NAME, issueSession, roleForPasscode, type Role } from "@/lib/auth";
 import { teamRoleForEmail } from "@/lib/identity";
 import { createLoginCode, consumeLoginCode } from "@/lib/login-codes";
 import { getResendConfig, loginCodeEmail, sendEmail } from "@/lib/resend";
@@ -20,14 +20,7 @@ export async function signIn(_prev: LoginState, formData: FormData): Promise<Log
     return { error: "That passcode doesn't match. Check the case and try again." };
   }
 
-  const jar = await cookies();
-  jar.set(COOKIE_NAME, issueToken(role), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 12,
-  });
+  await grantSession(role, null);
   logAudit(role, "sign_in");
   redirect("/");
 }
@@ -40,9 +33,9 @@ export async function signOut() {
 
 /* ---------------------------------------------------- passwordless sign-in */
 
-export async function grantSession(role: Role) {
+export async function grantSession(role: Role, email: string | null = null) {
   const jar = await cookies();
-  jar.set(COOKIE_NAME, issueToken(role), {
+  jar.set(COOKIE_NAME, issueSession(role, email), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -105,7 +98,7 @@ export async function verifyLoginCode(_prev: OtpState, form: FormData): Promise<
     return { error: "That email isn't on the team." };
   }
 
-  await grantSession(role);
+  await grantSession(role, email);
   await logAudit(role, "sign_in", "method", undefined, "email_code");
   redirect("/");
 }

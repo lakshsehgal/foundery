@@ -4,7 +4,10 @@ import { setupTempDb } from "./helpers.mjs";
 
 setupTempDb("auth");
 
-const { issueToken, verifyToken, roleForPasscode, newPublicToken, safeEqual, SESSION_TTL_MS } =
+const {
+  issueToken, issueSession, verifyToken, verifySession, roleForPasscode, newPublicToken,
+  safeEqual, SESSION_TTL_MS,
+} =
   await import("../src/lib/session");
 
 describe("passcodes", () => {
@@ -33,14 +36,45 @@ describe("session tokens", () => {
 
   test("editing the role in a token invalidates it", () => {
     const token = issueToken("operator");
-    const [, expiry, mac] = token.split(".");
-    assert.equal(verifyToken(`founder.${expiry}.${mac}`), null, "privilege escalation must fail");
+    const [, email64, expiry, mac] = token.split(".");
+    assert.equal(
+      verifyToken(`founder.${email64}.${expiry}.${mac}`),
+      null,
+      "privilege escalation must fail",
+    );
   });
 
   test("extending the expiry invalidates it", () => {
-    const [role, expiry, mac] = issueToken("founder").split(".");
+    const [role, email64, expiry, mac] = issueToken("founder").split(".");
     const later = String(Number(expiry) + 86_400_000);
-    assert.equal(verifyToken(`${role}.${later}.${mac}`), null);
+    assert.equal(verifyToken(`${role}.${email64}.${later}.${mac}`), null);
+  });
+
+  test("a session carries the email it was issued with, tamper-proof", () => {
+    const token = issueSession("operator", "ops@neuroidmedia.com");
+    assert.deepEqual(verifySession(token), { role: "operator", email: "ops@neuroidmedia.com" });
+
+    // Swapping in a different (validly encoded) email breaks the signature.
+    const forgedEmail = Buffer.from("laksh@neuroidmedia.com").toString("base64url");
+    const [role, , expiry, mac] = token.split(".");
+    assert.equal(verifySession(`${role}.${forgedEmail}.${expiry}.${mac}`), null);
+  });
+
+  test("a passcode session has a role and no identity", () => {
+    assert.deepEqual(verifySession(issueToken("founder")), { role: "founder", email: null });
+  });
+
+  test("a legacy three-part token still verifies until it expires", async () => {
+    // What issueToken produced before sessions carried an email.
+    const modern = issueSession("operator", null);
+    const [role, , expiry] = modern.split(".");
+    const crypto = await import("node:crypto");
+    const legacyPayload = `${role}.${expiry}`;
+    const mac = crypto
+      .createHmac("sha256", process.env.FOUNDERY_SESSION_SECRET || "dev-only-insecure-secret-change-me")
+      .update(legacyPayload)
+      .digest("base64url");
+    assert.deepEqual(verifySession(`${legacyPayload}.${mac}`), { role: "operator", email: null });
   });
 
   test("an expired token is refused even though it signs correctly", () => {

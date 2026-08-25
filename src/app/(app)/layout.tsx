@@ -1,4 +1,5 @@
-import { requireRole } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { currentSession } from "@/lib/auth";
 import { Sidebar } from "@/components/shell/sidebar";
 
 /**
@@ -6,11 +7,12 @@ import { Sidebar } from "@/components/shell/sidebar";
  * Each page supplies its own PageHeader plus the single scrolling pane.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const role = await requireRole();
+  const session = await currentSession();
+  if (!session) redirect("/login");
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Sidebar role={role} />
+      <Sidebar role={session.role} email={session.email} />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
     </div>
   );

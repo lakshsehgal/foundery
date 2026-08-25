@@ -1,22 +1,29 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { COOKIE_NAME, verifyToken, type Role } from "./session";
+import { COOKIE_NAME, verifySession, verifyToken, type Role, type Session } from "./session";
 
 /**
  * Request-scoped glue over lib/session. Everything here needs a request;
  * everything that doesn't lives in lib/session so it stays testable.
  */
 
-export type { Role };
+export type { Role, Session };
 export {
-  COOKIE_NAME, issueToken, newPublicToken, roleForPasscode, safeEqual, sessionSecret, verifyToken,
+  COOKIE_NAME, issueSession, issueToken, newPublicToken, roleForPasscode, safeEqual,
+  sessionSecret, verifySession, verifyToken,
 } from "./session";
 
 /** Current role, or null when signed out. Safe to call anywhere on the server. */
 export async function currentRole(): Promise<Role | null> {
   const jar = await cookies();
   return verifyToken(jar.get(COOKIE_NAME)?.value);
+}
+
+/** Role plus who signed in (null email for passcode sessions). */
+export async function currentSession(): Promise<Session | null> {
+  const jar = await cookies();
+  return verifySession(jar.get(COOKIE_NAME)?.value);
 }
 
 /** Require any signed-in role; bounces to /login otherwise. */
