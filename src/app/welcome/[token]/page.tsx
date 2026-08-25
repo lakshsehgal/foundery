@@ -43,6 +43,7 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
         label: item.label,
         instruction: item.hint.replaceAll("{value}", value),
         input: item.input ?? null,
+        optional: item.optional ?? false,
       })),
     };
   });

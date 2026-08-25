@@ -16,7 +16,13 @@ export type ResolvedAccessGroup = {
   value: string;
   highlight: { title: string; text: string } | null;
   banner: { text: string; tone: "info" | "good" } | null;
-  items: { key: string; label: string; instruction: string; input: "url" | "text" | null }[];
+  items: {
+    key: string;
+    label: string;
+    instruction: string;
+    input: "url" | "text" | null;
+    optional: boolean;
+  }[];
 };
 
 export function DetailsStep({
@@ -150,7 +156,9 @@ export function AccessStep({
   groups: ResolvedAccessGroup[];
 }) {
   const [state, action, pending] = useActionState<WelcomeState, FormData>(saveWelcomeAccess, {});
-  const items = groups.flatMap((group) => group.items);
+  // Optional items are nice-to-haves — the counter and completion track only
+  // the required ones, so a missing creative brief never holds the flow open.
+  const items = groups.flatMap((group) => group.items).filter((item) => !item.optional);
   const doneCount = items.filter((item) => onboarding.access[item.key]?.done).length;
 
   return (
@@ -267,7 +275,11 @@ export function AccessStep({
                   key={item.key}
                   className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-surface)] p-3.5"
                 >
-                  <Field label={item.label} hint={item.instruction} htmlFor={`val_${item.key}`}>
+                  <Field
+                    label={item.optional ? `${item.label} (optional)` : item.label}
+                    hint={item.instruction}
+                    htmlFor={`val_${item.key}`}
+                  >
                     {item.input === "url" ? (
                       <TextInput
                         id={`val_${item.key}`}

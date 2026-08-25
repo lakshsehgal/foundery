@@ -35,7 +35,8 @@ export function GuidedList({
         const status = ONBOARDING_STATUS[onboarding.status];
         const accessItems = accessItemsFor(onboarding.flow);
         const detailFields = detailFieldsFor(onboarding.flow);
-        const doneCount = accessItems.filter((item) => onboarding.access[item.key]?.done).length;
+        const required = accessItems.filter((item) => !item.optional);
+        const doneCount = required.filter((item) => onboarding.access[item.key]?.done).length;
         const isOpen = expanded === onboarding.id;
 
         return (
@@ -47,7 +48,7 @@ export function GuidedList({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[14px] font-bold">{onboarding.client_name}</p>
                 <p className="mt-0.5 text-[11.5px] text-[var(--color-ink-3)]">
-                  Accesses: {doneCount}/{accessItems.length} · started{" "}
+                  Accesses: {doneCount}/{required.length} · started{" "}
                   {onboarding.created_at.slice(0, 10)}
                 </p>
               </div>
@@ -138,6 +139,9 @@ export function GuidedList({
                             <span className="min-w-0">
                               <span className={`block text-[12.5px] ${entry?.done ? "" : "text-[var(--color-ink-2)]"}`}>
                                 {item.label}
+                                {item.optional && (
+                                  <span className="text-[var(--color-ink-3)]"> (optional)</span>
+                                )}
                               </span>
                               {entry?.note &&
                                 (item.input === "url" ? (

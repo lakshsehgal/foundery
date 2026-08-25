@@ -243,6 +243,8 @@ export type AccessItem = {
    * once filled in.
    */
   input?: "url" | "text";
+  /** Nice to have: never blocks completion and stays out of the counter. */
+  optional?: boolean;
 };
 
 export type AccessGroup = {
@@ -385,6 +387,13 @@ export const CREATIVE_ACCESS_GROUPS: AccessGroup[] = [
         label: "Anything to avoid",
         hint: "Words, phrases or elements we should never use in your ads.",
         input: "text",
+      },
+      {
+        key: "creative_brief",
+        label: "Creative brief",
+        hint: "A doc with your brief, if you already have one — we'll work from it.",
+        input: "url",
+        optional: true,
       },
     ],
   },

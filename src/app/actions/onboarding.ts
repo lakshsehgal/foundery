@@ -275,7 +275,7 @@ export async function saveWelcomeAccess(
   }
   const notes = String(form.get("access_notes") ?? "").trim().slice(0, 1000);
   if (notes) access[ACCESS_NOTES_KEY] = { done: false, note: notes };
-  const allDone = items.every((item) => access[item.key]?.done);
+  const allDone = items.filter((item) => !item.optional).every((item) => access[item.key]?.done);
 
   const db = await getDb();
   await db.query(
