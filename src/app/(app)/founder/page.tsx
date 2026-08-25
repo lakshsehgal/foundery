@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { AlertTriangle, ShieldCheck, TriangleAlert } from "lucide-react";
 import { requireFounder } from "@/lib/auth";
-import { clientEconomics, headline, projection, riskReport } from "@/lib/analytics";
+import { clientEconomics, efficiency, headline, projection, riskReport } from "@/lib/analytics";
 import { costTotals } from "@/lib/queries";
 import { defaultCurrency, fmtCompact, fmtMoney, fmtPct } from "@/lib/money";
 import { CATEGORY_LABEL, CATEGORY_TONE, HEALTH } from "@/lib/taxonomy";
@@ -54,6 +54,7 @@ export default async function FounderPage() {
     costTotals(),
   ]);
   const burn = totals.reduce((sum, row) => sum + row.total, 0);
+  const lever = efficiency(head, totals);
   const band = BAND_COPY[risk.band];
   const BandIcon = band.icon;
 
@@ -179,6 +180,73 @@ export default async function FounderPage() {
               </li>
             ))}
           </ul>
+        </Card>
+
+        {/* --------------------------------------------------- efficiency */}
+        <Card>
+          <CardTitle
+            title="Efficiency — what the team turns into"
+            hint={
+              lever.headcount > 0
+                ? `Per-head numbers read the ${lever.headcount} active salar${lever.headcount === 1 ? "y" : "ies"} on the Costs screen as the team.`
+                : "Add the team's salaries on the Costs screen and the per-head numbers light up."
+            }
+          />
+          <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile
+              label="Revenue / employee"
+              count={
+                lever.revenuePerHead === null ? "—" : (
+                  <Ticker value={lever.revenuePerHead} format="compact" currency={currency} />
+                )
+              }
+              tone="var(--color-series-3)"
+              hint={
+                lever.headcount > 0
+                  ? `${lever.headcount} on payroll · ${fmtCompact(lever.payroll, currency)} / month`
+                  : "No active salaries recorded"
+              }
+            />
+            <StatTile
+              label="Profit / employee"
+              count={
+                lever.profitPerHead === null ? "—" : (
+                  <Ticker value={lever.profitPerHead} format="compact" currency={currency} />
+                )
+              }
+              tone={
+                lever.profitPerHead !== null && lever.profitPerHead < 0
+                  ? "var(--color-critical)"
+                  : "var(--color-good)"
+              }
+              hint="Net profit spread across the team"
+            />
+            <StatTile
+              label="Payroll share"
+              count={lever.payrollSharePct === null ? "—" : <Ticker value={lever.payrollSharePct} digits={0} />}
+              unit={lever.payrollSharePct === null ? undefined : "% of revenue"}
+              tone={
+                lever.payrollSharePct !== null && lever.payrollSharePct >= 50
+                  ? "var(--color-warning)"
+                  : "var(--color-series-2)"
+              }
+              hint={
+                lever.deliverySharePct === null
+                  ? "Salaries against monthly revenue"
+                  : `Cost to serve is ${fmtPct(lever.deliverySharePct, 0)} of revenue`
+              }
+            />
+            <StatTile
+              label="Average client value"
+              count={
+                lever.avgClientValue === null ? "—" : (
+                  <Ticker value={lever.avgClientValue} format="compact" currency={currency} />
+                )
+              }
+              tone="var(--color-series-5)"
+              hint={`Monthly revenue across ${head.activeClients} active client${head.activeClients === 1 ? "" : "s"}`}
+            />
+          </div>
         </Card>
 
         {/* --------------------------------------------------- revenue mix */}

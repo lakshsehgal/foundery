@@ -124,6 +124,45 @@ export async function headline(): Promise<Headline> {
   };
 }
 
+/* ------------------------------------------------------------- efficiency */
+
+export type Efficiency = {
+  /** Active salary rows — one per person, same source as "Salaries — N people". */
+  headcount: number;
+  payroll: number;
+  revenuePerHead: number | null;
+  profitPerHead: number | null;
+  /** Salaries as a share of monthly revenue. */
+  payrollSharePct: number | null;
+  /** Cost to serve as a share of monthly revenue, across the whole book. */
+  deliverySharePct: number | null;
+  /** Average monthly revenue per active client. */
+  avgClientValue: number | null;
+};
+
+/**
+ * Per-head and per-client leverage. Pure maths over numbers the dashboard
+ * already fetches — headcount is the count of active salary rows, so it stays
+ * in step with the Costs screen without another query.
+ */
+export function efficiency(
+  head: Headline,
+  totals: { category: CostCategory; total: number; count: number }[],
+): Efficiency {
+  const salaries = totals.find((t) => t.category === "salary");
+  const headcount = salaries?.count ?? 0;
+  const payroll = salaries?.total ?? 0;
+  return {
+    headcount,
+    payroll,
+    revenuePerHead: headcount > 0 ? head.mrr / headcount : null,
+    profitPerHead: headcount > 0 ? head.netProfit / headcount : null,
+    payrollSharePct: head.mrr > 0 ? (payroll / head.mrr) * 100 : null,
+    deliverySharePct: head.mrr > 0 ? (head.deliveryCost / head.mrr) * 100 : null,
+    avgClientValue: head.activeClients > 0 ? head.mrr / head.activeClients : null,
+  };
+}
+
 /* ------------------------------------------------------------- projection */
 
 export type ProjectedMonth = {
