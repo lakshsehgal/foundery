@@ -71,6 +71,8 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
     notes: text(form, "notes"),
   };
 
+  let savedId = id ?? 0;
+
   const founderFields =
     role === "founder"
       ? {
@@ -127,6 +129,18 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
       ),
     );
     await logAudit(role, "client_created", "client", created.id, name);
+    savedId = created.id;
+  }
+
+  // Separate, forgiving write: the column ships in db/schema.sql, and a
+  // database that hasn't run it yet shouldn't lose the whole client save.
+  try {
+    await db.query(
+      `UPDATE foundery.clients SET billing_email = $1, billing_cc = $2 WHERE id = $3`,
+      [text(form, "billing_email"), text(form, "billing_cc"), savedId],
+    );
+  } catch {
+    console.warn("foundery.clients.billing_email missing — run db/schema.sql");
   }
 
   revalidatePath("/clients");

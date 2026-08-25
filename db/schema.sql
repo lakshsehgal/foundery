@@ -87,6 +87,10 @@ create index if not exists idx_invoices_client on foundery.invoices(client_id);
 -- re-syncing updates in place instead of duplicating.
 alter table foundery.invoices add column if not exists external_id text unique;
 alter table foundery.clients  add column if not exists zoho_name text;
+-- Where payment reminders from the Invoices page are sent (+ optional CCs,
+-- comma-separated, for the other people on the brand's side).
+alter table foundery.clients  add column if not exists billing_email text;
+alter table foundery.clients  add column if not exists billing_cc text;
 create index if not exists idx_invoices_due    on foundery.invoices(due_date);
 
 create table if not exists foundery.onboarding_forms (
@@ -148,8 +152,13 @@ create table if not exists foundery.raised_invoices (
   month     text not null,                        -- 'YYYY-MM'
   raised_at timestamptz not null default now(),
   raised_by text,
+  paid_at   timestamptz,                          -- when the payment landed
+  paid_by   text,
   unique (client_id, month)
 );
+-- Databases that created the table before the payment tick pick these up here.
+alter table foundery.raised_invoices add column if not exists paid_at timestamptz;
+alter table foundery.raised_invoices add column if not exists paid_by text;
 
 -- Who can sign in, managed from the dashboard. The environment allowlists
 -- remain the bootstrap fallback, so the very first login works with an empty

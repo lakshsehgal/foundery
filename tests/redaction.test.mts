@@ -187,4 +187,21 @@ describe("reminders", () => {
     const tasks = await billingTasks("founder", TODAY);
     assert.equal(tasks.every((task) => task.raised), true);
   });
+
+  test("the payment tick is a second state on top of raised", async () => {
+    const before = (await billingTasks("founder", TODAY)).find((task) => task.month === "2026-08")!;
+    assert.equal(before.raised, true);
+    assert.equal(before.paid, false, "raised alone is not paid");
+
+    await db.query(
+      `UPDATE foundery.raised_invoices SET paid_at = now(), paid_by = 'founder'
+       WHERE client_id = $1 AND month = '2026-08'`,
+      [kidology.id],
+    );
+    const after = (await billingTasks("founder", TODAY)).find((task) => task.month === "2026-08")!;
+    assert.equal(after.paid, true);
+    assert.ok(after.paidAt, "the paid date travels with the task");
+    const july = (await billingTasks("founder", TODAY)).find((task) => task.month === "2026-07")!;
+    assert.equal(july.paid, false, "each month carries its own tick");
+  });
 });

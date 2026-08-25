@@ -34,6 +34,10 @@ export type ClientView = {
   delivery_cost: number | null;
   health: Health | null;
   zoho_name: string | null;
+  /** Where payment reminders go. Operational, so visible to both roles. */
+  billing_email: string | null;
+  /** Comma-separated CCs for those reminders. */
+  billing_cc: string | null;
 };
 
 type ClientRow = {
@@ -42,6 +46,8 @@ type ClientRow = {
   end_date: string | null; billing_day: number; terms_days: number; currency: string;
   notes: string | null; retainer_amount: number; one_time_value: number;
   delivery_cost: number; health: string; zoho_name: string | null;
+  billing_email?: string | null;
+  billing_cc?: string | null;
 };
 
 /** jsonb arrives already parsed; anything else is treated as empty. */
@@ -71,6 +77,8 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     delivery_cost: showValues ? row.delivery_cost : null,
     health: showValues ? (row.health as Health) : null,
     zoho_name: showValues ? (row.zoho_name ?? null) : null,
+    billing_email: row.billing_email ?? null,
+    billing_cc: row.billing_cc ?? null,
   };
 }
 
@@ -286,6 +294,13 @@ export type BillingTask = {
   days: number;
   raised: boolean;
   raisedAt: string | null;
+  /** The second tick: the money actually landed. */
+  paid: boolean;
+  paidAt: string | null;
+  /** Where a payment reminder would go — set on the client. */
+  billingEmail: string | null;
+  /** Comma-separated CCs, from the client profile. */
+  billingCc: string | null;
   /** Retainer size — null when the role isn't cleared for client values. */
   amount: number | null;
   currency: string;
@@ -295,28 +310,39 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
   const [{ clientValues }, db] = await Promise.all([policyFor(role), getDb()]);
   const months = lastMonths(2, today.slice(0, 7)); // [previous, current]
 
+  // SELECT * on purpose: billing_email ships in db/schema.sql, and a database
+  // that hasn't run it yet should still serve this page.
   const clients = await db.query<{
     id: number; name: string; vip: boolean; billing_day: number;
     retainer_amount: number; currency: string; start_date: string | null;
+    billing_email?: string | null; billing_cc?: string | null;
   }>(
-    `SELECT id, name, vip, billing_day, retainer_amount, currency, start_date
-     FROM foundery.clients
+    `SELECT * FROM foundery.clients
      WHERE status = 'active' AND engagement = 'retainer'
      ORDER BY billing_day ASC, name ASC`,
   );
 
-  let marks: { client_id: number; month: string; raised_at: string }[] = [];
+  let marks: { client_id: number; month: string; raised_at: string; paid_at: string | null }[] = [];
   try {
     marks = await db.query(
-      `SELECT client_id, month, raised_at FROM foundery.raised_invoices WHERE month = ANY($1)`,
+      `SELECT client_id, month, raised_at, paid_at FROM foundery.raised_invoices WHERE month = ANY($1)`,
       [months],
     );
   } catch {
-    // The table ships in db/schema.sql. Until it's applied, every task simply
-    // reads as unraised; marking one reports the fix by name.
-    console.warn("foundery.raised_invoices missing — run db/schema.sql to enable invoice marks");
+    try {
+      // A table from before the payment tick still serves its raise marks.
+      const legacy = await db.query<{ client_id: number; month: string; raised_at: string }>(
+        `SELECT client_id, month, raised_at FROM foundery.raised_invoices WHERE month = ANY($1)`,
+        [months],
+      );
+      marks = legacy.map((mark) => ({ ...mark, paid_at: null }));
+    } catch {
+      // The table ships in db/schema.sql. Until it's applied, every task simply
+      // reads as unraised; marking one reports the fix by name.
+      console.warn("foundery.raised_invoices missing — run db/schema.sql to enable invoice marks");
+    }
   }
-  const marked = new Map(marks.map((mark) => [`${mark.client_id}:${mark.month}`, mark.raised_at]));
+  const marked = new Map(marks.map((mark) => [`${mark.client_id}:${mark.month}`, mark]));
 
   const out: BillingTask[] = [];
   for (const month of months) {
@@ -324,7 +350,7 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
       // A retainer that hadn't started yet owes nothing for that month.
       if (client.start_date && client.start_date.slice(0, 7) > month) continue;
       const raiseOn = billingDateFor(month, client.billing_day);
-      const raisedAt = marked.get(`${client.id}:${month}`) ?? null;
+      const mark = marked.get(`${client.id}:${month}`) ?? null;
       out.push({
         clientId: client.id,
         clientName: client.name,
@@ -334,8 +360,12 @@ export async function billingTasks(role: Role, today = todayISO()): Promise<Bill
         billingDay: client.billing_day,
         raiseOn,
         days: daysUntil(raiseOn, today),
-        raised: raisedAt !== null,
-        raisedAt: raisedAt ? String(raisedAt).slice(0, 10) : null,
+        raised: mark !== null,
+        raisedAt: mark ? String(mark.raised_at).slice(0, 10) : null,
+        paid: mark?.paid_at != null,
+        paidAt: mark?.paid_at ? String(mark.paid_at).slice(0, 10) : null,
+        billingEmail: client.billing_email ?? null,
+        billingCc: client.billing_cc ?? null,
         amount: clientValues ? client.retainer_amount : null,
         currency: client.currency,
       });

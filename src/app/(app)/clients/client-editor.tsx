@@ -80,6 +80,31 @@ export function ClientEditor({
           <Field label="Who runs it here" htmlFor="owner" hint="The name the client asks for.">
             <TextInput id="owner" name="owner" defaultValue={client?.owner ?? ""} placeholder="Account owner" />
           </Field>
+          <Field
+            label="Billing email"
+            htmlFor="billing_email"
+            hint="Payment reminders from the Invoices page go here."
+          >
+            <TextInput
+              id="billing_email"
+              name="billing_email"
+              type="email"
+              defaultValue={client?.billing_email ?? ""}
+              placeholder="accounts@client.com"
+            />
+          </Field>
+          <Field
+            label="CC on billing emails"
+            htmlFor="billing_cc"
+            hint="More people on their side — comma-separate the addresses."
+          >
+            <TextInput
+              id="billing_cc"
+              name="billing_cc"
+              defaultValue={client?.billing_cc ?? ""}
+              placeholder="founder@client.com, finance@client.com"
+            />
+          </Field>
         </div>
 
         <fieldset>

@@ -8,14 +8,18 @@ import {
   Card, CardTitle, Chip, EmptyState, PageBody, PageHeader, StatTile,
 } from "@/components/ui/primitives";
 import { Ticker } from "@/components/ui/ticker";
-import { MarkRaisedButton, UndoMarkButton } from "./mark-button";
+import {
+  MarkPaidButton, MarkRaisedButton, UndoMarkButton, UndoPaidButton,
+} from "./mark-button";
+import { ReminderButton } from "./reminder-button";
 
 export const metadata: Metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
 
 /**
- * Invoicing itself lives in Zoho Books. This page answers one question per
- * retainer per month — did the invoice go out? — and gives you the tick.
+ * Invoicing itself lives in Zoho Books. Each retainer-month here is a
+ * two-tick task: raised in Zoho, then payment received — and this page is
+ * where both ticks happen.
  */
 export default async function InvoicesPage() {
   const role = await requireRole();
@@ -26,13 +30,24 @@ export default async function InvoicesPage() {
   const currentMonth = today.slice(0, 7);
   const current = tasks.filter((task) => task.month === currentMonth);
   const missed = tasks.filter((task) => task.month < currentMonth && !task.raised);
+  const awaiting = tasks.filter((task) => task.raised && !task.paid);
+  const awaitingLastMonth = awaiting.filter((task) => task.month < currentMonth);
   const raisedCount = current.filter((task) => task.raised).length;
   const dueCount = current.filter((task) => !task.raised && task.days <= 0).length;
   const monthLabel = current[0]?.monthLabel ?? "";
 
   function statusFor(task: BillingTask) {
+    if (task.paid) {
+      return {
+        label: `Paid${task.paidAt ? ` · ${prettyDate(task.paidAt)}` : ""}`,
+        tone: "var(--color-good)",
+      };
+    }
     if (task.raised) {
-      return { label: `Raised${task.raisedAt ? ` · ${prettyDate(task.raisedAt)}` : ""}`, tone: "var(--color-good)" };
+      return {
+        label: `Raised${task.raisedAt ? ` · ${prettyDate(task.raisedAt)}` : ""} · awaiting payment`,
+        tone: "var(--color-series-1)",
+      };
     }
     if (task.days < 0) {
       return {
@@ -40,7 +55,12 @@ export default async function InvoicesPage() {
         tone: "var(--color-critical)",
       };
     }
-    if (task.days <= 3) return { label: `Due ${task.days === 0 ? "today" : prettyDate(task.raiseOn)}`, tone: "var(--color-warning)" };
+    if (task.days <= 3) {
+      return {
+        label: `Due ${task.days === 0 ? "today" : prettyDate(task.raiseOn)}`,
+        tone: "var(--color-warning)",
+      };
+    }
     return { label: `Up next · ${prettyDate(task.raiseOn)}`, tone: "var(--color-ink-3)" };
   }
 
@@ -68,11 +88,24 @@ export default async function InvoicesPage() {
           </p>
         </div>
         <Chip tone={status.tone}>{status.label}</Chip>
-        {task.raised ? (
-          <UndoMarkButton clientId={task.clientId} month={task.month} />
-        ) : (
-          <MarkRaisedButton clientId={task.clientId} month={task.month} />
+        {/* The two ticks: raise it first, then the payment — with a nudge
+            button while the money is still out. */}
+        {!task.raised && <MarkRaisedButton clientId={task.clientId} month={task.month} />}
+        {task.raised && !task.paid && (
+          <>
+            <ReminderButton
+              clientId={task.clientId}
+              clientName={task.clientName}
+              billingEmail={task.billingEmail}
+              billingCc={task.billingCc}
+              monthLabel={task.monthLabel}
+              amountLabel={task.amount !== null ? fmtMoney(task.amount, currency) : null}
+            />
+            <MarkPaidButton clientId={task.clientId} month={task.month} />
+            <UndoMarkButton clientId={task.clientId} month={task.month} />
+          </>
         )}
+        {task.paid && <UndoPaidButton clientId={task.clientId} month={task.month} />}
       </li>
     );
   }
@@ -81,10 +114,10 @@ export default async function InvoicesPage() {
     <>
       <PageHeader
         title="Invoices"
-        subtitle="Raised in Zoho Books — ticked off here so nothing slips a month"
+        subtitle="Raised in Zoho Books, then paid — two ticks so nothing slips"
       />
       <PageBody width={860}>
-        <div className="stagger grid gap-3 sm:grid-cols-3">
+        <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Still to raise"
             count={<Ticker value={current.length - raisedCount} />}
@@ -96,6 +129,16 @@ export default async function InvoicesPage() {
             count={<Ticker value={raisedCount} />}
             tone="var(--color-good)"
             hint={`Of ${current.length} retainer${current.length === 1 ? "" : "s"} this month`}
+          />
+          <StatTile
+            label="Awaiting payment"
+            count={<Ticker value={awaiting.length} />}
+            tone={awaiting.length > 0 ? "var(--color-series-1)" : undefined}
+            hint={
+              awaitingLastMonth.length > 0
+                ? `${awaitingLastMonth.length} from last month`
+                : "Raised, money not yet in"
+            }
           />
           <StatTile
             label="Missed last month"
@@ -121,11 +164,27 @@ export default async function InvoicesPage() {
           </Card>
         )}
 
+        {awaitingLastMonth.length > 0 && (
+          <Card padded={false}>
+            <div className="p-4 pb-0">
+              <CardTitle
+                title={`Awaiting payment — ${awaitingLastMonth[0].monthLabel}`}
+                hint="Raised last month, money not yet marked in. Chase in Zoho, tick here when it lands."
+              />
+            </div>
+            <ul className="stagger divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
+              {awaitingLastMonth.map((task) => (
+                <TaskRow key={`${task.clientId}-${task.month}`} task={task} />
+              ))}
+            </ul>
+          </Card>
+        )}
+
         <Card padded={false}>
           <div className="p-4 pb-0">
             <CardTitle
               title={`This month — ${monthLabel}`}
-              hint="Every active retainer, in billing-day order. Raise the invoice in Zoho Books, then mark it here."
+              hint="Every active retainer, in billing-day order. Raise the invoice in Zoho Books, mark it, then tick again when the payment lands."
             />
           </div>
           {current.length === 0 ? (
@@ -145,9 +204,9 @@ export default async function InvoicesPage() {
 
         <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-[var(--color-ink-3)]">
           <AlertTriangle size={13} className="mt-[1px] shrink-0" aria-hidden />
-          Amounts, PDFs and payment chasing live in Zoho Books. This list answers one question —
-          did this month&apos;s invoice go out? One-off project invoices are raised straight in Zoho
-          as milestones land.
+          Amounts, PDFs and the actual chasing live in Zoho Books. This list answers two questions —
+          did this month&apos;s invoice go out, and did the money come in? One-off project invoices
+          are raised straight in Zoho as milestones land.
         </p>
       </PageBody>
     </>

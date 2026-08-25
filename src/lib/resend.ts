@@ -35,6 +35,7 @@ export async function sendEmail(
   to: string,
   subject: string,
   html: string,
+  cc: string[] = [],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -42,7 +43,13 @@ export async function sendEmail(
       Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: config.from, to: [to], subject, html }),
+    body: JSON.stringify({
+      from: config.from,
+      to: [to],
+      ...(cc.length > 0 ? { cc } : {}),
+      subject,
+      html,
+    }),
   });
 
   if (response.ok) return { ok: true };
@@ -53,6 +60,71 @@ export async function sendEmail(
     error:
       body?.message ??
       `Resend returned HTTP ${response.status} — check the API key and that the from-address domain is verified.`,
+  };
+}
+
+/**
+ * The sender for payment reminders — the accounts desk, not the app.
+ * Overridable via the accounts_from settings row; the domain must be
+ * verified in Resend for delivery to work.
+ */
+export async function accountsFrom(): Promise<string> {
+  const settings = await getSettings();
+  return settings.get("accounts_from") || "Neuroid Accounts <noreply@neuroidmedia.com>";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The payment check-in. Written like a person, on purpose: plain paragraphs,
+ * no logo block, no buttons, no marketing furniture — templated mail gets
+ * filed as noise, a short human note gets answered.
+ */
+export function paymentReminderEmail(input: {
+  brand: string;
+  amount: string;
+  invoiceNumbers: string;
+  monthLabel: string;
+}): { subject: string; html: string } {
+  const brand = escapeHtml(input.brand.trim());
+  const amount = escapeHtml(input.amount.trim());
+  const numbers = escapeHtml(input.invoiceNumbers.trim());
+  const month = escapeHtml(input.monthLabel.trim());
+
+  const invoiceLine = numbers
+    ? `invoice ${numbers}${month ? ` for ${month}` : ""}`
+    : `our ${month || "latest"} invoice`;
+
+  const paragraph = (text: string) =>
+    `<p style="margin:0 0 14px;color:#1f2430;font-size:14px;line-height:1.65;">${text}</p>`;
+
+  return {
+    subject: numbers
+      ? `Checking in on invoice ${input.invoiceNumbers.trim()} — ${input.brand.trim()}`
+      : `Checking in on our ${input.monthLabel.trim()} invoice — ${input.brand.trim()}`,
+    html: `
+<div style="margin:0;padding:8px 4px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  ${paragraph(`Hi ${brand} team,`)}
+  ${paragraph(
+    `Hope things are going well on your side. Just checking in on ${invoiceLine}${
+      amount ? ` (${amount})` : ""
+    } — it's still showing as pending at our end, so I wanted to see where it stands.`,
+  )}
+  ${paragraph(
+    `If it's already been processed, please ignore this — these things cross over all the time. And if something's holding it up (an approval, a portal step, anything missing from us), just reply here and we'll sort it out.`,
+  )}
+  ${paragraph(`Thanks!`)}
+  <p style="margin:0;color:#1f2430;font-size:14px;line-height:1.65;">
+    Accounts<br />
+    <span style="color:#6b7280;">Neuroid Media</span>
+  </p>
+</div>`,
   };
 }
 
