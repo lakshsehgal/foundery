@@ -17,7 +17,7 @@ export async function getResendConfig(): Promise<ResendConfig | null> {
   if (process.env.RESEND_API_KEY) {
     return {
       apiKey: process.env.RESEND_API_KEY,
-      from: process.env.RESEND_FROM || "Foundery <onboarding@resend.dev>",
+      from: process.env.RESEND_FROM || "Cortex <onboarding@resend.dev>",
     };
   }
   const settings = await getSettings();
@@ -25,7 +25,7 @@ export async function getResendConfig(): Promise<ResendConfig | null> {
   if (!apiKey) return null;
   return {
     apiKey,
-    from: settings.get("resend_from") || "Foundery <onboarding@resend.dev>",
+    from: settings.get("resend_from") || "Cortex <onboarding@resend.dev>",
   };
 }
 
@@ -62,25 +62,25 @@ export async function sendEmail(
  */
 export function loginCodeEmail(code: string): { subject: string; html: string } {
   return {
-    subject: `${code} is your Foundery sign-in code`,
+    subject: `${code} is your Cortex sign-in code`,
     html: `
 <div style="margin:0;padding:32px 16px;background:#f6f7fb;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:420px;margin:0 auto;">
     <tr><td style="padding:0 4px 14px;">
       <span style="display:inline-block;background:#FEEF24;color:#111111;font-weight:800;font-size:14px;letter-spacing:0.08em;padding:6px 10px;border-radius:6px;">NEUROID</span>
-      <span style="color:#4d5563;font-size:13px;margin-left:8px;">Foundery</span>
+      <span style="color:#4d5563;font-size:13px;margin-left:8px;">Cortex</span>
     </td></tr>
     <tr><td style="background:#ffffff;border:1px solid #e4e7ee;border-radius:12px;padding:28px;">
       <p style="margin:0;color:#14181f;font-size:15px;font-weight:600;">Your sign-in code</p>
       <p style="margin:8px 0 20px;color:#4d5563;font-size:13px;line-height:1.5;">
-        Type this into the Foundery sign-in page. It works for 10 minutes.
+        Type this into the Cortex sign-in page. It works for 10 minutes.
       </p>
       <p style="margin:0;text-align:center;background:#f7f8fa;border:1px solid #e4e7ee;border-radius:8px;padding:16px 0;font-size:30px;font-weight:800;letter-spacing:0.28em;color:#14181f;font-variant-numeric:tabular-nums;">${code}</p>
       <p style="margin:20px 0 0;color:#8892a2;font-size:12px;line-height:1.5;">
         Didn't try to sign in? Ignore this email — nothing happens without the code.
       </p>
     </td></tr>
-    <tr><td style="padding:14px 4px 0;color:#8892a2;font-size:11px;">Neuroid Media · Foundery</td></tr>
+    <tr><td style="padding:14px 4px 0;color:#8892a2;font-size:11px;">Neuroid Media · Cortex</td></tr>
   </table>
 </div>`,
   };

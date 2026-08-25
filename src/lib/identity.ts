@@ -6,7 +6,7 @@ import type { Role } from "./session";
  * Sign-in without passwords.
  *
  * Supabase Auth does the identity ceremony — Google OAuth or a 6-digit email
- * code — and this module answers the only question Foundery actually has:
+ * code — and this module answers the only question Cortex actually has:
  * which verified email is this, and is it on a list? Once verified, the
  * ordinary signed role cookie is minted (see actions/auth.ts) and everything
  * downstream — requireRole, requireFounder, the policy layer — is untouched.

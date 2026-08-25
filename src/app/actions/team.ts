@@ -85,7 +85,7 @@ export async function saveResend(_prev: ActionState, form: FormData): Promise<Ac
   if (to.includes("@")) {
     const config = await getResendConfig();
     const message = loginCodeEmail("000000");
-    const delivery = await sendEmail(config!, to, "Foundery email test — it works", message.html);
+    const delivery = await sendEmail(config!, to, "Cortex email test — it works", message.html);
     if (!delivery.ok) {
       return {
         error: `Saved, but the test email failed: ${delivery.error}`,

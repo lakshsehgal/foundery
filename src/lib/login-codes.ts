@@ -4,7 +4,7 @@ import { getDb } from "./db";
 import { sessionSecret } from "./session";
 
 /**
- * Foundery's own one-time codes: generated here, hashed here, verified here.
+ * Cortex's own one-time codes: generated here, hashed here, verified here.
  * The email provider only ever carries the code — no magic links, no
  * redirect chains, nothing that can break between inbox and sign-in page.
  */

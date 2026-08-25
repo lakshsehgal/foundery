@@ -54,7 +54,7 @@ export async function grantSession(role: Role) {
 export type OtpState = { error?: string; sentTo?: string };
 
 /**
- * Step 1 of the email flow: a 6-digit code, generated and stored by Foundery
+ * Step 1 of the email flow: a 6-digit code, generated and stored by Cortex
  * and delivered by Resend — the email contains the code itself, never a
  * link, so there is no redirect chain to break. The team list is checked
  * BEFORE sending: a stranger's address never receives mail, and the failure
@@ -87,7 +87,7 @@ export async function sendLoginCode(_prev: OtpState, form: FormData): Promise<Ot
   return { sentTo: email };
 }
 
-/** Step 2: the code comes back, Foundery verifies it, the role cookie is minted. */
+/** Step 2: the code comes back, Cortex verifies it, the role cookie is minted. */
 export async function verifyLoginCode(_prev: OtpState, form: FormData): Promise<OtpState> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const code = String(form.get("code") ?? "").trim();

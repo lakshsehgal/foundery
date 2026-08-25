@@ -41,7 +41,7 @@ const asNumber = (value: string) => Number(value);
 
 /**
  * Money is `numeric` in the schema, which both drivers return as a string to
- * protect precision they assume you need. Foundery's largest realistic figure
+ * protect precision they assume you need. Cortex's largest realistic figure
  * is a few crore, which a double holds exactly to the paisa, so parsing to a
  * number here keeps every downstream sum ordinary arithmetic.
  *

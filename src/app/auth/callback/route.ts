@@ -7,7 +7,7 @@ import { logAudit } from "@/lib/db";
 
 /**
  * Google sends the user back here. The code becomes a Supabase session just
- * long enough to learn which verified email this is; then Foundery's own
+ * long enough to learn which verified email this is; then Cortex's own
  * role cookie is minted from the allowlist and the Supabase session is
  * dropped — one session system, not two.
  */

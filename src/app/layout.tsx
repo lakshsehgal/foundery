@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Foundery", template: "%s · Foundery" },
+  title: { default: "Neuroid Cortex", template: "%s · Cortex" },
   description: "Neuroid's founders dashboard — clients, costs, invoices and what they add up to.",
 };
 

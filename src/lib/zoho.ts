@@ -7,8 +7,8 @@ import "server-only";
  * environment, exchanged here for short-lived access tokens (cached until
  * a minute before expiry). Setup lives in README → "Zoho Books sync".
  *
- * Sync direction is one-way, Zoho → Foundery, on purpose: Zoho stays the
- * accounting system of record; Foundery mirrors the state to drive the
+ * Sync direction is one-way, Zoho → Cortex, on purpose: Zoho stays the
+ * accounting system of record; Cortex mirrors the state to drive the
  * chasing feed and the P&L. Nothing here writes back to Zoho.
  */
 
@@ -194,7 +194,7 @@ export async function fetchZohoInvoices(config: ZohoConfig): Promise<ZohoInvoice
   return out;
 }
 
-/** Zoho's invoice statuses folded onto Foundery's five. */
+/** Zoho's invoice statuses folded onto Cortex's five. */
 export function mapZohoStatus(status: string, balance: number, total: number): string {
   switch (status) {
     case "draft": return "draft";

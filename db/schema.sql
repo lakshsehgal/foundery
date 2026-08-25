@@ -1,4 +1,4 @@
--- Foundery schema (PostgreSQL / Supabase).
+-- Cortex schema (PostgreSQL / Supabase).
 --
 -- Everything lives in the `foundery` schema rather than `public` on purpose:
 -- Supabase auto-generates a REST API over `public`, and these tables hold

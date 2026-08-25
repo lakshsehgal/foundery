@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs what Foundery needs so tests, typecheck and the dev server work the
+# Installs what Cortex needs so tests, typecheck and the dev server work the
 # moment a Claude Code on the web session opens.
 set -euo pipefail
 

@@ -51,7 +51,7 @@ export function InvoiceEditor({
       title={invoice ? `Invoice ${invoice.number}` : "Raise an invoice"}
       description={
         canEditAmounts
-          ? "Terms decide the due date, and the due date is what Foundery counts down from."
+          ? "Terms decide the due date, and the due date is what Cortex counts down from."
           : "You can set the dates, terms and status. The amount is the founder's to set."
       }
       width={580}

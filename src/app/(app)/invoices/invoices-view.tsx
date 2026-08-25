@@ -112,7 +112,7 @@ export function InvoicesView({
             title={invoices.length === 0 ? "No invoices yet" : "Nothing here"}
             hint={
               invoices.length === 0
-                ? "Raise one and Foundery starts counting the days to its due date for you."
+                ? "Raise one and Cortex starts counting the days to its due date for you."
                 : "Everything in this filter is settled. Try another one."
             }
             action={

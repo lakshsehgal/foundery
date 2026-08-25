@@ -246,7 +246,7 @@ export function StatTile({
   );
 }
 
-/* ------------------------------------------------- Foundery additions
+/* ------------------------------------------------- Cortex additions
    Everything below was needed by a screen and didn't exist in the kit, so
    it lives here once rather than being re-invented per page. */
 

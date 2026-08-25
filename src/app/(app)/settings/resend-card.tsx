@@ -41,7 +41,7 @@ export function ResendCard({
           and paste it here. Until you verify your domain in Resend, leave the from-address as the
           default — it delivers to your own inbox, enough to sign in yourself. Verify{" "}
           <b>neuroidmedia.com</b> under Resend → Domains (two DNS records) and set the from-address
-          to something like <b>Foundery &lt;foundery@neuroidmedia.com&gt;</b> to reach the operator
+          to something like <b>Cortex &lt;cortex@neuroidmedia.com&gt;</b> to reach the operator
           too.
         </p>
       )}
@@ -56,7 +56,7 @@ export function ResendCard({
             htmlFor="re_from"
             hint="Needs a domain verified in Resend; blank = Resend's test sender."
           >
-            <TextInput id="re_from" name="from" placeholder="Foundery <foundery@neuroidmedia.com>" />
+            <TextInput id="re_from" name="from" placeholder="Cortex <cortex@neuroidmedia.com>" />
           </Field>
         </div>
         <Field

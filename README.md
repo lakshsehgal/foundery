@@ -1,4 +1,4 @@
-# Foundery
+# Neuroid Cortex
 
 Neuroid's founders dashboard. Clients, costs, invoices, onboarding and profit
 in one place, with a line down the middle: the operator runs the day, the
@@ -18,7 +18,7 @@ npm run seed              # optional: fills the database with a sample agency
 npm run dev               # http://localhost:3000
 ```
 
-No database to install. With `DATABASE_URL` empty, Foundery runs on **PGlite** —
+No database to install. With `DATABASE_URL` empty, Cortex runs on **PGlite** —
 Postgres compiled to WASM — against a local `.pglite/` directory. It is the same
 engine and the same SQL that runs on Supabase, so local development and the test
 suite exercise the real thing rather than a stand-in.
@@ -153,7 +153,7 @@ nothing" are different statements.
 client pays late they are two different businesses.
 
 **The reminder that matters most is for an invoice that doesn't exist.**
-Foundery checks each active retainer against its billing day and tells you
+Cortex checks each active retainer against its billing day and tells you
 when this month's invoice hasn't gone out — the failure that costs a month of
 cash and never appears on an invoice list, because the missing invoice isn't
 there to be listed.
@@ -179,14 +179,14 @@ checklist instructions include your actual IDs.
 ## Sign-in
 
 Passwordless, two ways: **Continue with Google** (through Supabase Auth), or
-a **6-digit code emailed** to you — generated and verified by Foundery
+a **6-digit code emailed** to you — generated and verified by Cortex
 itself and delivered by **Resend**, so the email contains the code and never
 a link. Who gets in is managed on the **Team card** (Settings): add or
 remove founder/operator emails from the dashboard. The environment lists
 (`FOUNDERY_FOUNDER_EMAILS`, default the founder's address) remain the floor
 beneath the table, so the founder can never be locked out. The list is
 checked *before* any code is sent — a stranger's address never receives
-mail. After identity is verified, Foundery mints its own signed 12-hour role
+mail. After identity is verified, Cortex mints its own signed 12-hour role
 cookie, so the role/redaction layer is identical across every sign-in path.
 
 Resend setup is one card: paste an API key from resend.com, optionally a
@@ -202,13 +202,13 @@ environment.
 
 ## Zoho Books sync
 
-One-way, Zoho → Foundery: Zoho stays the accounting system of record, and
-Foundery mirrors it to drive the chasing feed and the P&L. A **Sync Zoho**
+One-way, Zoho → Cortex: Zoho stays the accounting system of record, and
+Cortex mirrors it to drive the chasing feed and the P&L. A **Sync Zoho**
 button on the invoices page (founder only) plus a nightly cron at 08:00 IST.
 Invoices are matched to clients **by customer name** (case-insensitive);
 unmatched customers are skipped and named so you can add them — sync never
 invents clients. Re-syncs update in place via Zoho's invoice id; invoices you
-raised by hand in Foundery are never touched.
+raised by hand in Cortex are never touched.
 
 Setup (once):
 1. https://api-console.zoho.in → **Self Client** → note the Client ID/Secret.
@@ -289,7 +289,7 @@ pg_dump "$DATABASE_URL" --schema=foundery --no-owner -f "foundery-$(date +%F).sq
 ### A note on Supabase's REST API
 
 Supabase auto-generates a public REST API over the `public` schema, reachable
-with the anon key. Foundery's tables hold salaries and client revenue, so they
+with the anon key. Cortex's tables hold salaries and client revenue, so they
 live in a **`foundery` schema instead** — PostgREST never sees them. Row level
 security is switched on underneath as a second lock, and the app connects as
 the owner role, which bypasses RLS by design. Don't move these tables into

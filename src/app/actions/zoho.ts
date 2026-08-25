@@ -12,14 +12,14 @@ import type { ActionState } from "./clients";
 /**
  * Pull every invoice from Zoho Books and mirror it here.
  *
- * Matching: a Zoho customer maps to a Foundery client by name,
+ * Matching: a Zoho customer maps to a Cortex client by name,
  * case-insensitively. Unmatched customers are skipped and reported — sync
  * never invents clients, because a client card carries commercial judgements
  * (VIP, health, cost to serve) no import can make.
  *
  * Upsert key is Zoho's invoice_id in external_id, so re-running updates in
  * place: a payment recorded in Zoho flips the invoice here on the next sync.
- * Manually-raised Foundery invoices (no external_id) are never touched.
+ * Manually-raised Cortex invoices (no external_id) are never touched.
  */
 export async function syncZohoInvoices(): Promise<{
   ok?: string;

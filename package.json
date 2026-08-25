@@ -2,7 +2,7 @@
   "name": "foundery",
   "version": "0.1.0",
   "private": true,
-  "description": "Foundery — Neuroid founders dashboard",
+  "description": "Neuroid Cortex — the Neuroid founders dashboard",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

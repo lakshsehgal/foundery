@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Sign in" };
 
 const PROMISES: [string, string][] = [
   ["Every client on one page", "Who they are, what they bought, and who matters most — without opening three tools."],
-  ["The invoice you forgot to raise", "Foundery counts the days for you and says the name out loud before the month closes."],
+  ["The invoice you forgot to raise", "Cortex counts the days for you and says the name out loud before the month closes."],
   ["Numbers that stay yours", "Your operator runs the day. Salaries, margins and profit stay behind your passcode."],
 ];
 
@@ -58,7 +58,7 @@ export default async function LoginPage({
             className="text-[12px] font-medium uppercase tracking-[0.2em]"
             style={{ color: "var(--color-brand)" }}
           >
-            Foundery
+            Cortex
           </p>
 
           <h1 className="display mt-5 text-[2.7rem] leading-[1.08] text-white">

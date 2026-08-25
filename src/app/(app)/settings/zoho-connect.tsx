@@ -20,7 +20,7 @@ export function ZohoConnectCard({ connected }: { connected: boolean }) {
     <Card>
       <CardTitle
         title="Zoho Books"
-        hint="One-way sync: Zoho stays the system of record, Foundery mirrors the invoices nightly and on demand."
+        hint="One-way sync: Zoho stays the system of record, Cortex mirrors the invoices nightly and on demand."
       >
         <Chip tone={connected ? "var(--color-good)" : "var(--color-ink-3)"} size="md">
           {connected ? "Connected" : "Not connected"}

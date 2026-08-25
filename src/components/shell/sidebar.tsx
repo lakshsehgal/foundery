@@ -111,7 +111,7 @@ export function Sidebar({ role }: { role: Role }) {
       <div className="flex h-14 shrink-0 items-center border-b border-[var(--color-line)] px-3">
         <span
           aria-hidden
-          title="Foundery"
+          title="Neuroid Cortex"
           className={`mx-auto h-6 w-6 rounded-[var(--radius-xs)] ${collapsed ? "" : "lg:hidden"}`}
           style={{ background: "var(--color-brand)" }}
         />
