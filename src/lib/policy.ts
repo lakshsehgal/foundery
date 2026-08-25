@@ -19,8 +19,6 @@ export type Visibility = {
   role: Role;
   /** Per-client money: retainer value, project value, cost to serve, health. */
   clientValues: boolean;
-  /** Amounts on invoices. Dates, terms and status are always visible. */
-  invoiceAmounts: boolean;
   /** Margins, revenue projections, risk analysis. */
   founderAnalytics: boolean;
   /** Profit tracker and P&L. */
@@ -36,17 +34,10 @@ export const OPERATOR_SWITCHES = [
     hint: "Retainer size, project value and cost to serve on the clients table.",
     fallback: "0",
   },
-  {
-    key: "operator_sees_invoice_amounts",
-    label: "Invoice amounts",
-    hint: "The figure on each invoice. With this off the operator still chases dates, terms and paid/unpaid.",
-    fallback: "1",
-  },
 ] as const;
 
 const FOUNDER_SEES_EVERYTHING: Omit<Visibility, "role"> = {
   clientValues: true,
-  invoiceAmounts: true,
   founderAnalytics: true,
   pnl: true,
   costLineItems: () => true,
@@ -61,7 +52,6 @@ export async function policyFor(role: Role): Promise<Visibility> {
   return {
     role,
     clientValues: flag("operator_sees_client_values", "0"),
-    invoiceAmounts: flag("operator_sees_invoice_amounts", "1"),
     founderAnalytics: false,
     pnl: false,
     // Salary line items are never operator-visible, by design and not by setting.

@@ -139,6 +139,18 @@ create index if not exists idx_onboardings_client on foundery.onboardings(client
 -- Databases created before flows existed pick the column up here.
 alter table foundery.onboardings add column if not exists flow text not null default 'performance';
 
+-- Invoicing lives in Zoho Books; Cortex only remembers whether each month's
+-- retainer invoice was raised there. One mark per client per month — the
+-- reminder feed reads absence of a mark as "still to raise".
+create table if not exists foundery.raised_invoices (
+  id        bigint generated always as identity primary key,
+  client_id bigint not null references foundery.clients(id) on delete cascade,
+  month     text not null,                        -- 'YYYY-MM'
+  raised_at timestamptz not null default now(),
+  raised_by text,
+  unique (client_id, month)
+);
+
 -- Who can sign in, managed from the dashboard. The environment allowlists
 -- remain the bootstrap fallback, so the very first login works with an empty
 -- table and the founder can never lock themself out.
@@ -189,4 +201,5 @@ alter table foundery.settings               enable row level security;
 alter table foundery.onboardings            enable row level security;
 alter table foundery.team_members           enable row level security;
 alter table foundery.login_codes            enable row level security;
+alter table foundery.raised_invoices        enable row level security;
 alter table foundery.audit_log              enable row level security;

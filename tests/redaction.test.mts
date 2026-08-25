@@ -5,7 +5,7 @@ import { setupTempDb, TODAY } from "./helpers.mjs";
 setupTempDb("redaction");
 
 const { getDb, setSetting } = await import("../src/lib/db");
-const { listClients, listCosts, costTotals, listInvoices, reminders } = await import("../src/lib/queries");
+const { listClients, listCosts, costTotals, billingTasks, reminders } = await import("../src/lib/queries");
 const { policyFor } = await import("../src/lib/policy");
 
 const db = await getDb();
@@ -37,12 +37,6 @@ await db.query(
   `INSERT INTO foundery.costs (category, label, amount, cadence, start_date, active)
    VALUES ('tools','Figma',3600,'monthly','2026-01-01',true),
           ('tools','Adobe',84000,'annual','2026-01-01',true)`,
-);
-
-await db.query(
-  `INSERT INTO foundery.invoices (client_id, number, issue_date, due_date, terms_days, amount, amount_paid, status)
-   VALUES ($1,'NRD-1','2026-07-20','2026-08-04',15,185000,0,'sent')`,
-  [kidology.id],
 );
 
 describe("costs: a person's pay never reaches an operator", () => {
@@ -119,68 +113,78 @@ describe("clients: values follow the founder's switch", () => {
 
   test("no switch can open individual salaries", async () => {
     await setSetting("operator_sees_client_values", "1");
-    await setSetting("operator_sees_invoice_amounts", "1");
     assert.equal((await policyFor("operator")).costLineItems("salary"), false);
     assert.ok(!JSON.stringify(await listCosts("operator")).includes("Priya Nair"));
     await setSetting("operator_sees_client_values", "0");
   });
 });
 
-describe("invoices", () => {
-  test("amounts follow the switch, dates and status never do", async () => {
-    await setSetting("operator_sees_invoice_amounts", "0");
-    const [invoice] = await listInvoices("operator", TODAY);
-    assert.equal(invoice.amount, null);
-    assert.equal(invoice.outstanding, null);
-    assert.equal(invoice.due_date, "2026-08-04", "dates stay, so the operator can still chase");
-    assert.equal(invoice.status, "sent");
-    assert.equal(invoice.overdue, true);
-    await setSetting("operator_sees_invoice_amounts", "1");
-    assert.equal((await listInvoices("operator", TODAY))[0].amount, 185000);
+describe("billing tasks: raised in Zoho, ticked off here", () => {
+  test("an active retainer gets a task for last month and this month; a project gets none", async () => {
+    const tasks = await billingTasks("founder", TODAY);
+    assert.deepEqual(
+      tasks.map((task) => [task.clientName, task.month, task.raised]),
+      [
+        ["Kidology", "2026-07", false],
+        ["Kidology", "2026-08", false],
+      ],
+      "Nordwell is a one-off project — its invoices are raised straight in Zoho",
+    );
+    assert.equal(tasks[0].raiseOn, "2026-07-01");
   });
 
-  test("overdue is counted in whole days from the due date", async () => {
-    const [invoice] = await listInvoices("founder", TODAY);
-    assert.equal(invoice.daysUntilDue, -20);
+  test("amounts follow the client-values switch; names and dates never hide", async () => {
+    const [task] = await billingTasks("operator", TODAY);
+    assert.equal(task.amount, null);
+    assert.equal(task.clientName, "Kidology");
+    assert.equal(task.billingDay, 1);
+    await setSetting("operator_sees_client_values", "1");
+    assert.equal((await billingTasks("operator", TODAY))[0].amount, 185000);
+    await setSetting("operator_sees_client_values", "0");
   });
 
-  test("a paid invoice stops counting down", async () => {
+  test("a retainer that started this month owes nothing for last month", async () => {
     await db.query(
-      `UPDATE foundery.invoices SET status='paid', amount_paid=amount, paid_date=$1 WHERE number='NRD-1'`,
-      [TODAY],
+      `INSERT INTO foundery.clients (name, slug, status, engagement, services, retainer_amount,
+         start_date, billing_day, terms_days)
+       VALUES ('Fresh Signing','fresh','active','retainer','[]',50000,'2026-08-15',20,15)`,
     );
-    const [invoice] = await listInvoices("founder", TODAY);
-    assert.equal(invoice.daysUntilDue, null);
-    assert.equal(invoice.overdue, false);
-    await db.query(
-      `UPDATE foundery.invoices SET status='sent', amount_paid=0, paid_date=NULL WHERE number='NRD-1'`,
-    );
+    const months = (await billingTasks("founder", TODAY))
+      .filter((task) => task.clientName === "Fresh Signing")
+      .map((task) => task.month);
+    assert.deepEqual(months, ["2026-08"]);
+    await db.query(`DELETE FROM foundery.clients WHERE slug = 'fresh'`);
   });
 });
 
 describe("reminders", () => {
-  test("an unbilled retainer is surfaced even though no invoice exists to list", async () => {
-    // Kidology has a July invoice, not an August one, and bills on the 1st.
+  test("a missed month outranks this month's late raise", async () => {
     const feed = await reminders("founder", TODAY);
-    const toRaise = feed.filter((item) => item.kind === "to_raise");
-    assert.equal(toRaise.length, 1);
-    assert.equal(toRaise[0].clientName, "Kidology");
-    assert.ok(toRaise[0].title.includes("late going out"));
+    assert.deepEqual(
+      feed.map((item) => item.kind),
+      ["missed", "to_raise"],
+    );
+    assert.ok(feed[0].title.includes("was never raised"));
+    assert.ok(feed[1].title.includes("late going out"));
   });
 
-  test("raising this month's invoice clears the nudge", async () => {
+  test("marking the month raised clears its nudge", async () => {
     await db.query(
-      `INSERT INTO foundery.invoices (client_id, number, issue_date, due_date, terms_days, amount, status)
-       VALUES ($1,'NRD-2','2026-08-01','2026-08-16',15,185000,'sent')`,
+      `INSERT INTO foundery.raised_invoices (client_id, month, raised_by) VALUES ($1, '2026-08', 'founder')`,
       [kidology.id],
     );
     const feed = await reminders("founder", TODAY);
     assert.equal(feed.filter((item) => item.kind === "to_raise").length, 0);
+    assert.equal(feed.filter((item) => item.kind === "missed").length, 1, "July is still open");
   });
 
-  test("overdue sorts ahead of due-soon", async () => {
-    const kinds = (await reminders("founder", TODAY)).map((item) => item.kind);
-    assert.deepEqual(kinds, [...kinds].sort((a) => (a === "overdue" ? -1 : 1)));
-    assert.equal(kinds[0], "overdue");
+  test("marking the missed month empties the feed", async () => {
+    await db.query(
+      `INSERT INTO foundery.raised_invoices (client_id, month, raised_by) VALUES ($1, '2026-07', 'founder')`,
+      [kidology.id],
+    );
+    assert.deepEqual(await reminders("founder", TODAY), []);
+    const tasks = await billingTasks("founder", TODAY);
+    assert.equal(tasks.every((task) => task.raised), true);
   });
 });

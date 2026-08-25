@@ -1,6 +1,7 @@
 import "server-only";
 import { getDb, getSetting } from "./db";
-import { costsForMonth, costTotals, monthlyBurn } from "./queries";
+import { billingTasks, costsForMonth, costTotals, monthlyBurn } from "./queries";
+import { defaultCurrency, fmtCompact } from "./money";
 import { lastMonths, monthKey, monthLabel, todayISO } from "./dates";
 import type { CostCategory, Health } from "./taxonomy";
 import { marginPct, spreadProject } from "./economics";
@@ -259,7 +260,6 @@ const SEVERITY_WEIGHT = { good: 0, warning: 8, serious: 18, critical: 30 };
  */
 export async function riskReport(today = todayISO()): Promise<RiskReport> {
   const findings: RiskFinding[] = [];
-  const db = await getDb();
   const economics = await clientEconomics();
   const totalMrr = economics.reduce((sum, c) => sum + c.mrr, 0);
 
@@ -293,38 +293,42 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
     });
   }
 
-  // 2 — Money owed and late.
-  const [receivables] = await db.query<{
-    outstanding: number; overdue: number; overduecount: number;
-  }>(
-    `SELECT COALESCE(SUM(amount - amount_paid), 0) AS outstanding,
-            COALESCE(SUM(CASE WHEN due_date < $1 THEN amount - amount_paid ELSE 0 END), 0) AS overdue,
-            COUNT(CASE WHEN due_date < $1 AND status NOT IN ('paid','void') THEN 1 END) AS overdueCount
-     FROM foundery.invoices WHERE status NOT IN ('paid','void')`,
-    [today],
+  // 2 — Invoices that never went out. Invoicing lives in Zoho, so the risk
+  // Cortex can actually see is the raise that was never marked: a missed
+  // month is revenue nobody asked to be paid.
+  const tasks = await billingTasks("founder", today);
+  const currentMonth = today.slice(0, 7);
+  const unraised = tasks.filter(
+    (task) => !task.raised && (task.month < currentMonth || task.days < 0),
   );
-
-  // Postgres folds unquoted identifiers to lower case, so overdueCount comes
-  // back as overduecount.
-  const overdueCount = Number(receivables.overduecount);
-  const burn = await monthlyBurn();
-  const overdueMonths = burn > 0 ? receivables.overdue / burn : 0;
-  const receivableSeverity =
-    overdueMonths >= 1 ? "critical" : overdueMonths >= 0.5 ? "serious" : receivables.overdue > 0 ? "warning" : "good";
+  const missedMonth = unraised.filter((task) => task.month < currentMonth);
+  const unraisedMrr = unraised.reduce((sum, task) => sum + (task.amount ?? 0), 0);
+  const raiseSeverity =
+    missedMonth.length >= 2
+      ? "critical"
+      : missedMonth.length === 1
+        ? "serious"
+        : unraised.length > 0
+          ? "warning"
+          : "good";
   findings.push({
-    key: "receivables",
+    key: "unraised",
     title:
-      overdueCount > 0
-        ? `${overdueCount} invoice${overdueCount === 1 ? "" : "s"} past due`
-        : "Nothing overdue",
+      unraised.length > 0
+        ? `${unraised.length} retainer invoice${unraised.length === 1 ? "" : "s"} not raised`
+        : "Every retainer is invoiced",
     detail:
-      receivables.overdue > 0
-        ? `That is ${overdueMonths.toFixed(1)} months of running costs sitting in someone else's account.`
-        : "Everything raised is either paid or still inside terms.",
-    severity: receivableSeverity,
-    metric: receivables.overdue > 0 ? `${overdueMonths.toFixed(1)}× burn` : "0",
-    action: receivables.overdue > 0 ? "Chase the oldest one today, before the newest." : "Nothing to do.",
+      unraised.length > 0
+        ? `${unraised.map((task) => task.clientName).join(", ")} — money nobody has been asked to pay yet.`
+        : "Nothing is past its billing day unmarked, and last month closed clean.",
+    severity: raiseSeverity,
+    metric: unraised.length > 0 ? fmtCompact(unraisedMrr, defaultCurrency()) : "0",
+    action:
+      unraised.length > 0
+        ? "Raise them in Zoho now, then mark them on the Invoices page."
+        : "Nothing to do.",
   });
+  const burn = await monthlyBurn();
 
   // 3 — Margin.
   const head = await headline();
@@ -455,10 +459,8 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
 export type PnlMonth = {
   month: string;
   label: string;
-  /** Everything invoiced with an issue date in the month. */
-  invoiced: number;
-  /** Everything actually banked in the month. */
-  collected: number;
+  /** Contracted revenue in the month: retainers plus spread project slices. */
+  contracted: number;
   otherIncome: number;
   costs: number;
   oneOffCosts: number;
@@ -471,34 +473,29 @@ export type PnlMonth = {
   marginPct: number | null;
   closed: boolean;
   notes: string | null;
-  /** False when the month has no invoices and no costs — show "—", not zero. */
+  /** False when the month has nothing in it — show "—", not zero. */
   hasData: boolean;
 };
 
-export async function pnl(
-  months = 12,
-  basis: "invoiced" | "collected" = "invoiced",
-): Promise<PnlMonth[]> {
+/**
+ * With invoicing in Zoho, the P&L reads revenue off the book itself: each
+ * month gets every retainer live in it plus each project's monthly slice,
+ * bounded by the contract's dates. Churned clients still count inside their
+ * dates — the month they earned in doesn't un-happen — but a churned client
+ * with no end date recorded is skipped rather than counted forever.
+ */
+export async function pnl(months = 12): Promise<PnlMonth[]> {
   const keys = lastMonths(months);
+  const currentKey = keys[keys.length - 1];
   const db = await getDb();
 
-  // Both revenue sides and every manual row in three queries rather than
-  // three per month — a serverless round trip to Supabase is not free.
-  const [invoicedRows, collectedRows, manualRows] = await Promise.all([
-    db.query<{ month: string; total: number }>(
-      `SELECT to_char(issue_date, 'YYYY-MM') AS month, COALESCE(SUM(amount), 0) AS total
-       FROM foundery.invoices
-       WHERE status <> 'void' AND to_char(issue_date, 'YYYY-MM') = ANY($1)
-       GROUP BY 1`,
-      [keys],
-    ),
-    db.query<{ month: string; total: number }>(
-      `SELECT to_char(paid_date, 'YYYY-MM') AS month, COALESCE(SUM(amount_paid), 0) AS total
-       FROM foundery.invoices
-       WHERE status <> 'void' AND paid_date IS NOT NULL
-         AND to_char(paid_date, 'YYYY-MM') = ANY($1)
-       GROUP BY 1`,
-      [keys],
+  const [contracts, manualRows] = await Promise.all([
+    db.query<{
+      status: string; engagement: string; retainer_amount: number;
+      one_time_value: number; start_date: string | null; end_date: string | null;
+    }>(
+      `SELECT status, engagement, retainer_amount, one_time_value, start_date, end_date
+       FROM foundery.clients`,
     ),
     db.query<{
       month: string; other_income: number; one_off_costs: number;
@@ -506,20 +503,31 @@ export async function pnl(
     }>(`SELECT * FROM foundery.pnl_months WHERE month = ANY($1)`, [keys]),
   ]);
 
-  const invoicedBy = new Map(invoicedRows.map((row) => [row.month, Number(row.total)]));
-  const collectedBy = new Map(collectedRows.map((row) => [row.month, Number(row.total)]));
   const manualBy = new Map(manualRows.map((row) => [row.month, row]));
   const monthCosts = await Promise.all(keys.map((month) => costsForMonth(month)));
 
   return keys.map((month, index) => {
-    const invoiced = invoicedBy.get(month) ?? 0;
-    const collected = collectedBy.get(month) ?? 0;
-    const manual = manualBy.get(month);
+    let contracted = 0;
+    for (const row of contracts) {
+      if (row.status === "churned" && !row.end_date) continue;
+      if (row.end_date && row.end_date.slice(0, 7) < month) continue;
+      if (row.start_date && row.start_date.slice(0, 7) > month) continue;
+      if (row.engagement === "retainer") {
+        contracted += row.retainer_amount;
+      } else if (row.start_date || row.end_date) {
+        contracted += spreadProject(row.one_time_value, row.start_date, row.end_date);
+      } else if (month === currentKey) {
+        // An undated project can't be placed historically — count its monthly
+        // slice in the current month only rather than in every month forever.
+        contracted += spreadProject(row.one_time_value, null, null);
+      }
+    }
 
+    const manual = manualBy.get(month);
     const otherIncome = manual?.other_income ?? 0;
     const oneOffCosts = manual?.one_off_costs ?? 0;
     const costs = monthCosts[index] + oneOffCosts;
-    const revenue = (basis === "invoiced" ? invoiced : collected) + otherIncome;
+    const revenue = contracted + otherIncome;
     const profitBeforeTax = revenue - costs;
     const taxRate = manual?.tax_rate ?? 0;
     const tax = profitBeforeTax > 0 ? profitBeforeTax * taxRate : 0;
@@ -527,8 +535,7 @@ export async function pnl(
     return {
       month,
       label: monthLabel(month),
-      invoiced,
-      collected,
+      contracted,
       otherIncome,
       costs,
       oneOffCosts,
@@ -540,7 +547,7 @@ export async function pnl(
       marginPct: revenue > 0 ? ((profitBeforeTax - tax) / revenue) * 100 : null,
       closed: manual?.closed === true,
       notes: manual?.notes ?? null,
-      hasData: invoiced > 0 || collected > 0 || costs > 0 || otherIncome > 0,
+      hasData: contracted > 0 || costs > 0 || otherIncome > 0,
     };
   });
 }

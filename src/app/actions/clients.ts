@@ -80,7 +80,6 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
           health: ["green", "amber", "red"].includes(String(form.get("health")))
             ? String(form.get("health"))
             : "green",
-          zoho_name: text(form, "zoho_name"),
         }
       : null;
 
@@ -100,7 +99,7 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
       await db.query(
         ...named(
           `UPDATE foundery.clients SET retainer_amount=@retainer_amount, one_time_value=@one_time_value,
-             delivery_cost=@delivery_cost, health=@health, zoho_name=@zoho_name, updated_at=now()
+             delivery_cost=@delivery_cost, health=@health, updated_at=now()
            WHERE id=@id`,
           { ...founderFields, id },
         ),
@@ -112,10 +111,10 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
       ...named(
         `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, owner,
            start_date, end_date, billing_day, terms_days, notes,
-           retainer_amount, one_time_value, delivery_cost, health, zoho_name)
+           retainer_amount, one_time_value, delivery_cost, health)
          VALUES (@name, @slug, @status, @engagement, @vip, @services::jsonb, @owner,
            @start_date, @end_date, @billing_day, @terms_days, @notes,
-           @retainer_amount, @one_time_value, @delivery_cost, @health, @zoho_name)
+           @retainer_amount, @one_time_value, @delivery_cost, @health)
          RETURNING id`,
         {
           ...common,
@@ -124,7 +123,6 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
           one_time_value: founderFields?.one_time_value ?? 0,
           delivery_cost: founderFields?.delivery_cost ?? 0,
           health: founderFields?.health ?? "green",
-          zoho_name: founderFields?.zoho_name ?? null,
         },
       ),
     );

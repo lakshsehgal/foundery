@@ -125,18 +125,6 @@ export const HEALTH: Record<Health, { label: string; tone: string; hint: string 
   red: { label: "At risk", tone: "var(--color-critical)", hint: "Could leave this quarter." },
 };
 
-/* ----------------------------------------------------------------- invoices */
-
-export type InvoiceStatus = "draft" | "sent" | "part_paid" | "paid" | "void";
-
-export const INVOICE_STATUS: Record<InvoiceStatus, { label: string; tone: string }> = {
-  draft: { label: "Draft", tone: "var(--color-ink-3)" },
-  sent: { label: "Sent", tone: "var(--color-series-1)" },
-  part_paid: { label: "Part paid", tone: "var(--color-warning)" },
-  paid: { label: "Paid", tone: "var(--color-good)" },
-  void: { label: "Void", tone: "var(--color-ink-3)" },
-};
-
 /** Default onboarding questions a new form starts with. */
 export const DEFAULT_ONBOARDING_FIELDS = [
   { key: "brand", label: "Brand name", type: "text", required: true, hint: "" },

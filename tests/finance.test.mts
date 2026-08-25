@@ -15,17 +15,15 @@ const { billingDateFor, daysUntil, lastMonths } = await import("../src/lib/dates
 
 const db = await getDb();
 
-const [big] = await db.query<{ id: number }>(
+await db.query(
   `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, retainer_amount,
      delivery_cost, start_date, billing_day, terms_days, health)
-   VALUES ('Big','big','active','retainer',false,'[]',400000,150000,'2026-01-01',1,15,'green')
-   RETURNING id`,
+   VALUES ('Big','big','active','retainer',false,'[]',400000,150000,'2026-01-01',1,15,'green')`,
 );
-const [small] = await db.query<{ id: number }>(
+await db.query(
   `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, retainer_amount,
      delivery_cost, start_date, billing_day, terms_days, health)
-   VALUES ('Small','small','active','retainer',false,'[]',100000,90000,'2026-01-01',1,15,'red')
-   RETURNING id`,
+   VALUES ('Small','small','active','retainer',false,'[]',100000,90000,'2026-01-01',1,15,'red')`,
 );
 
 // A cost that ran for three months and then stopped.
@@ -142,8 +140,8 @@ describe("cost history", () => {
 });
 
 describe("P&L", () => {
-  test("a month with no invoices and no costs is unknown, not zero", async () => {
-    const rows = await pnl(12, "invoiced");
+  test("a month with no contracts and no costs is unknown, not zero", async () => {
+    const rows = await pnl(12);
     const early = rows.find((row) => row.month === "2025-09");
     assert.ok(early);
     assert.equal(early.hasData, false, "shown as a dash, so it can't read as a month we earned nothing");
@@ -151,47 +149,43 @@ describe("P&L", () => {
 
   test("tax only applies to a month that made a profit", async () => {
     await db.query(
-      `INSERT INTO foundery.invoices (client_id, number, issue_date, due_date, terms_days, amount, amount_paid, status, paid_date)
-       VALUES ($1,'A','2026-07-01','2026-07-16',15,500000,500000,'paid','2026-07-10')`,
-      [big.id],
-    );
-    await db.query(
       `INSERT INTO foundery.pnl_months (month, other_income, one_off_costs, tax_rate, closed)
        VALUES ('2026-07', 0, 0, 0.25, true)`,
     );
 
-    const july = (await pnl(12, "invoiced")).find((row) => row.month === "2026-07")!;
-    assert.equal(july.invoiced, 500000);
+    // July's contracted book: Big 400k + Small 100k, against the 200k salary.
+    const july = (await pnl(12)).find((row) => row.month === "2026-07")!;
+    assert.equal(july.contracted, 500000);
     assert.equal(july.costs, 200000);
     assert.equal(july.profitBeforeTax, 300000);
     assert.equal(july.tax, 75000);
     assert.equal(july.profit, 225000);
     assert.equal(july.taxRatePct, 25);
 
-    // A loss-making month is not taxed.
+    // A loss-making month is not taxed: a 600k one-off sinks June below zero.
     await db.query(
       `INSERT INTO foundery.pnl_months (month, other_income, one_off_costs, tax_rate, closed)
-       VALUES ('2026-06', 0, 0, 0.25, true)`,
+       VALUES ('2026-06', 0, 600000, 0.25, true)`,
     );
-    const june = (await pnl(12, "invoiced")).find((row) => row.month === "2026-06")!;
+    const june = (await pnl(12)).find((row) => row.month === "2026-06")!;
     assert.ok(june.profitBeforeTax < 0);
     assert.equal(june.tax, 0);
   });
 
-  test("invoiced and collected are different questions", async () => {
+  test("a churned client earns inside its dates and vanishes after them", async () => {
     await db.query(
-      `INSERT INTO foundery.invoices (client_id, number, issue_date, due_date, terms_days, amount, amount_paid, status, paid_date)
-       VALUES ($1,'B','2026-05-01','2026-05-16',15,300000,300000,'paid','2026-06-20')`,
-      [small.id],
+      `INSERT INTO foundery.clients (name, slug, status, engagement, services, retainer_amount,
+         start_date, end_date, billing_day, terms_days)
+       VALUES ('Old Flame','old-flame','churned','retainer','[]',250000,'2026-01-01','2026-03-31',1,15)`,
     );
-    const invoiced = (await pnl(12, "invoiced")).find((row) => row.month === "2026-05")!;
-    const collected = (await pnl(12, "collected")).find((row) => row.month === "2026-05")!;
-    assert.equal(invoiced.invoiced, 300000);
-    assert.equal(collected.collected, 0, "the money landed in June, not May");
+    const rows = await pnl(12);
+    assert.equal(rows.find((row) => row.month === "2026-03")!.contracted, 750000);
+    assert.equal(rows.find((row) => row.month === "2026-04")!.contracted, 500000);
+    await db.query(`DELETE FROM foundery.clients WHERE slug = 'old-flame'`);
   });
 
   test("totals ignore months that never happened", async () => {
-    const rows = await pnl(12, "invoiced");
+    const rows = await pnl(12);
     const totals = pnlTotals(rows);
     assert.equal(totals.months, rows.filter((row) => row.hasData).length);
     assert.ok(totals.months < 12);

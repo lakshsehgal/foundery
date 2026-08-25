@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import type { Metadata } from "next";
 import { requireFounder } from "@/lib/auth";
 import { pnl, pnlTotals } from "@/lib/analytics";
@@ -8,36 +7,25 @@ import {
   Card, CardTitle, PageBody, PageHeader, ProfitBars, StatTile, TableWrap, Td, Th,
 } from "@/components/ui/primitives";
 import { Ticker } from "@/components/ui/ticker";
-import { BasisToggle } from "./basis-toggle";
 import { MonthEditor } from "./month-editor";
 
 export const metadata: Metadata = { title: "Profit & P&L" };
 export const dynamic = "force-dynamic";
 
-export default async function PnlPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ basis?: string }>;
-}) {
+export default async function PnlPage() {
   await requireFounder();
 
-  const { basis: rawBasis } = await searchParams;
-  const basis = rawBasis === "collected" ? "collected" : "invoiced";
   const currency = defaultCurrency();
   const symbol = symbolFor(currency);
 
-  const months = await pnl(12, basis);
+  const months = await pnl(12);
   const totals = pnlTotals(months);
   const current = monthKey();
   const withData = months.filter((month) => month.hasData);
 
   return (
     <>
-      <PageHeader title="Profit & P&L" subtitle="Twelve months, month by month">
-        <Suspense fallback={null}>
-          <BasisToggle basis={basis} />
-        </Suspense>
-      </PageHeader>
+      <PageHeader title="Profit & P&L" subtitle="Twelve months, month by month" />
 
       <PageBody width={1120}>
         <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -45,7 +33,7 @@ export default async function PnlPage({
             label={`Revenue · ${totals.months} months`}
             count={<Ticker value={totals.revenue} format="compact" currency={currency} />}
             tone="var(--color-series-1)"
-            hint={basis === "invoiced" ? "Counted when invoiced" : "Counted when banked"}
+            hint="Contracted revenue, month by month"
           />
           <StatTile
             label="Costs"
@@ -77,7 +65,7 @@ export default async function PnlPage({
           />
           {withData.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-[var(--color-ink-3)]">
-              No months have any figures in them yet. Raise an invoice or add a cost and this fills in.
+              No months have any figures in them yet. Add clients with values or a cost and this fills in.
             </p>
           ) : (
             <ProfitBars
@@ -95,14 +83,14 @@ export default async function PnlPage({
           <div className="p-4 pb-0">
             <CardTitle
               title="The statement"
-              hint="Revenue from your invoices, costs from the cost base as it stood in that month, plus anything you added by hand."
+              hint="Revenue from the contracted book — retainers plus project slices, month by month — costs from the cost base as it stood, plus anything you added by hand. Actual billing lives in Zoho."
             />
           </div>
           <TableWrap>
             <thead>
               <tr>
                 <Th>Month</Th>
-                <Th align="right">{basis === "invoiced" ? "Invoiced" : "Collected"}</Th>
+                <Th align="right">Contracted</Th>
                 <Th align="right">Other income</Th>
                 <Th align="right">Costs</Th>
                 <Th align="right">Before tax</Th>
@@ -158,7 +146,7 @@ export default async function PnlPage({
                     <>
                       <Td align="right">
                         <span className="tabular">
-                          {fmtMoney(basis === "invoiced" ? month.invoiced : month.collected, currency)}
+                          {fmtMoney(month.contracted, currency)}
                         </span>
                       </Td>
                       <Td align="right">

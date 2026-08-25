@@ -3,9 +3,9 @@ import { getDb } from "./db";
 import type { Role } from "./session";
 import { policyFor } from "./policy";
 import { monthlyEquivalent } from "./money";
-import { billingDateFor, daysUntil, monthKey, todayISO, addDays } from "./dates";
+import { billingDateFor, daysUntil, lastMonths, monthLabel, todayISO } from "./dates";
 import type {
-  ClientStatus, CostCategory, Engagement, Health, InvoiceStatus, OnboardingField,
+  ClientStatus, CostCategory, Engagement, Health, OnboardingField,
   OnboardingFlow,
 } from "./taxonomy";
 import { CATEGORY_LABEL, COST_CATEGORIES } from "./taxonomy";
@@ -265,204 +265,145 @@ export async function costsForMonth(month: string): Promise<number> {
   return recurring + Number(oneOffs?.total ?? 0);
 }
 
-/* -------------------------------------------------------------- invoices */
+/* --------------------------------------------------------------- billing */
 
-export type InvoiceView = {
-  id: number;
-  client_id: number;
-  client_name: string;
+/**
+ * Invoicing happens in Zoho Books; Cortex only tracks whether each month's
+ * retainer invoice has been raised there. A task exists for every active
+ * retainer for the previous and current month; a mark in raised_invoices is
+ * what closes it.
+ */
+export type BillingTask = {
+  clientId: number;
+  clientName: string;
   vip: boolean;
-  number: string;
-  period: string | null;
-  issue_date: string;
-  due_date: string;
-  terms_days: number;
+  month: string; // 'YYYY-MM'
+  monthLabel: string;
+  billingDay: number;
+  /** The date the invoice should go out — billing day clamped to the month. */
+  raiseOn: string;
+  /** Negative = the billing date is that many days past. */
+  days: number;
+  raised: boolean;
+  raisedAt: string | null;
+  /** Retainer size — null when the role isn't cleared for client values. */
   amount: number | null;
-  amount_paid: number | null;
-  outstanding: number | null;
   currency: string;
-  status: InvoiceStatus;
-  paid_date: string | null;
-  notes: string | null;
-  /** Negative = overdue by N days. Null once paid or void. */
-  daysUntilDue: number | null;
-  overdue: boolean;
 };
 
-type InvoiceRow = {
-  id: number; client_id: number; client_name: string; vip: boolean; number: string;
-  period: string | null; issue_date: string; due_date: string; terms_days: number;
-  amount: number; amount_paid: number; currency: string; status: string;
-  paid_date: string | null; notes: string | null;
-};
+export async function billingTasks(role: Role, today = todayISO()): Promise<BillingTask[]> {
+  const [{ clientValues }, db] = await Promise.all([policyFor(role), getDb()]);
+  const months = lastMonths(2, today.slice(0, 7)); // [previous, current]
 
-function toInvoiceView(row: InvoiceRow, showAmounts: boolean, today: string): InvoiceView {
-  const settled = row.status === "paid" || row.status === "void";
-  const days = settled ? null : daysUntil(row.due_date, today);
-  return {
-    id: row.id,
-    client_id: row.client_id,
-    client_name: row.client_name,
-    vip: row.vip,
-    number: row.number,
-    period: row.period,
-    issue_date: row.issue_date,
-    due_date: row.due_date,
-    terms_days: row.terms_days,
-    amount: showAmounts ? row.amount : null,
-    amount_paid: showAmounts ? row.amount_paid : null,
-    outstanding: showAmounts ? Math.max(0, row.amount - row.amount_paid) : null,
-    currency: row.currency,
-    status: row.status as InvoiceStatus,
-    paid_date: row.paid_date,
-    notes: row.notes,
-    daysUntilDue: days,
-    overdue: days !== null && days < 0,
-  };
-}
-
-export async function listInvoices(role: Role, today = todayISO()): Promise<InvoiceView[]> {
-  const [{ invoiceAmounts }, db] = await Promise.all([policyFor(role), getDb()]);
-  const rows = await db.query<InvoiceRow>(
-    `SELECT i.*, c.name AS client_name, c.vip AS vip
-     FROM foundery.invoices i JOIN foundery.clients c ON c.id = i.client_id
-     ORDER BY (i.status IN ('paid','void')) ASC, i.due_date ASC`,
+  const clients = await db.query<{
+    id: number; name: string; vip: boolean; billing_day: number;
+    retainer_amount: number; currency: string; start_date: string | null;
+  }>(
+    `SELECT id, name, vip, billing_day, retainer_amount, currency, start_date
+     FROM foundery.clients
+     WHERE status = 'active' AND engagement = 'retainer'
+     ORDER BY billing_day ASC, name ASC`,
   );
-  return rows.map((row) => toInvoiceView(row, invoiceAmounts, today));
+
+  let marks: { client_id: number; month: string; raised_at: string }[] = [];
+  try {
+    marks = await db.query(
+      `SELECT client_id, month, raised_at FROM foundery.raised_invoices WHERE month = ANY($1)`,
+      [months],
+    );
+  } catch {
+    // The table ships in db/schema.sql. Until it's applied, every task simply
+    // reads as unraised; marking one reports the fix by name.
+    console.warn("foundery.raised_invoices missing — run db/schema.sql to enable invoice marks");
+  }
+  const marked = new Map(marks.map((mark) => [`${mark.client_id}:${mark.month}`, mark.raised_at]));
+
+  const out: BillingTask[] = [];
+  for (const month of months) {
+    for (const client of clients) {
+      // A retainer that hadn't started yet owes nothing for that month.
+      if (client.start_date && client.start_date.slice(0, 7) > month) continue;
+      const raiseOn = billingDateFor(month, client.billing_day);
+      const raisedAt = marked.get(`${client.id}:${month}`) ?? null;
+      out.push({
+        clientId: client.id,
+        clientName: client.name,
+        vip: client.vip,
+        month,
+        monthLabel: monthLabel(month),
+        billingDay: client.billing_day,
+        raiseOn,
+        days: daysUntil(raiseOn, today),
+        raised: raisedAt !== null,
+        raisedAt: raisedAt ? String(raisedAt).slice(0, 10) : null,
+        amount: clientValues ? client.retainer_amount : null,
+        currency: client.currency,
+      });
+    }
+  }
+  return out;
 }
 
 /**
- * The reminder feed: what needs chasing, and what still has to be raised.
- *
- * "Due soon" is a 10-day window because net-15 terms mean a nudge at day 5
- * is noise and a nudge at day 14 is too late.
+ * The reminder feed: retainer invoices still to be raised in Zoho. A missed
+ * month outranks this month's list, and inside a month the most overdue
+ * billing day comes first.
  */
 export type Reminder = {
-  kind: "overdue" | "due_soon" | "to_raise";
+  kind: "missed" | "to_raise";
   title: string;
   detail: string;
   clientName: string;
   vip: boolean;
   amount: number | null;
   currency: string;
-  dueDate: string;
+  /** The date the invoice should have gone out. */
+  raiseOn: string;
   days: number;
-  invoiceId?: number;
+  month: string;
   clientId: number;
 };
 
-const DUE_SOON_WINDOW_DAYS = 10;
-
 export async function reminders(role: Role, today = todayISO()): Promise<Reminder[]> {
+  const tasks = await billingTasks(role, today);
+  const currentMonth = today.slice(0, 7);
   const out: Reminder[] = [];
 
-  for (const invoice of await listInvoices(role, today)) {
-    if (invoice.status === "paid" || invoice.status === "void") continue;
-    const days = invoice.daysUntilDue ?? 0;
-    if (days < 0) {
+  for (const task of tasks) {
+    if (task.raised) continue;
+    const base = {
+      clientName: task.clientName,
+      vip: task.vip,
+      amount: task.amount,
+      currency: task.currency,
+      raiseOn: task.raiseOn,
+      days: task.days,
+      month: task.month,
+      clientId: task.clientId,
+    };
+    if (task.month < currentMonth) {
       out.push({
-        kind: "overdue",
-        title: `${invoice.number} is ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} overdue`,
-        detail:
-          invoice.status === "part_paid"
-            ? "Part paid — chase the balance."
-            : "Sent and unpaid. Chase it.",
-        clientName: invoice.client_name,
-        vip: invoice.vip,
-        amount: invoice.outstanding,
-        currency: invoice.currency,
-        dueDate: invoice.due_date,
-        days,
-        invoiceId: invoice.id,
-        clientId: invoice.client_id,
+        kind: "missed",
+        title: `${task.clientName}'s ${task.monthLabel} invoice was never raised`,
+        detail: "The whole month went by without a mark. Raise it in Zoho, then tick it off.",
+        ...base,
       });
-    } else if (days <= DUE_SOON_WINDOW_DAYS) {
+    } else if (task.days <= 3) {
+      // Surface this month's raises from three days ahead of the billing date.
       out.push({
-        kind: "due_soon",
-        title: `${invoice.number} is due ${days === 0 ? "today" : `in ${days} ${days === 1 ? "day" : "days"}`}`,
-        detail: invoice.status === "draft" ? "Still a draft — send it." : `Net ${invoice.terms_days} terms.`,
-        clientName: invoice.client_name,
-        vip: invoice.vip,
-        amount: invoice.outstanding,
-        currency: invoice.currency,
-        dueDate: invoice.due_date,
-        days,
-        invoiceId: invoice.id,
-        clientId: invoice.client_id,
+        kind: "to_raise",
+        title:
+          task.days < 0
+            ? `${task.clientName}'s retainer invoice is ${Math.abs(task.days)} ${Math.abs(task.days) === 1 ? "day" : "days"} late going out`
+            : `Raise ${task.clientName}'s retainer invoice`,
+        detail: `Billing day ${task.billingDay} — not yet marked raised for ${task.monthLabel}.`,
+        ...base,
       });
     }
   }
 
-  out.push(...(await invoicesToRaise(role, today)));
-
-  const rank = { overdue: 0, due_soon: 1, to_raise: 2 };
+  const rank = { missed: 0, to_raise: 1 };
   return out.sort((a, b) => rank[a.kind] - rank[b.kind] || a.days - b.days);
-}
-
-/**
- * Retainers that should have been billed this month and haven't been.
- *
- * This is the "did we remember to invoice?" check — the failure mode that
- * costs an agency a month of cash and never shows up on an invoice list,
- * because the missing invoice isn't there to be listed.
- */
-export async function invoicesToRaise(role: Role, today = todayISO()): Promise<Reminder[]> {
-  const [{ invoiceAmounts }, db] = await Promise.all([policyFor(role), getDb()]);
-  const month = monthKey(new Date(today));
-
-  // One query rather than one per client: the clients with no invoice raised
-  // in this month at all.
-  const rows = await db.query<{
-    id: number; name: string; vip: boolean; billing_day: number;
-    terms_days: number; retainer_amount: number; currency: string;
-  }>(
-    `SELECT c.id, c.name, c.vip, c.billing_day, c.terms_days, c.retainer_amount, c.currency
-     FROM foundery.clients c
-     WHERE c.status = 'active' AND c.engagement = 'retainer'
-       AND NOT EXISTS (
-         SELECT 1 FROM foundery.invoices i
-         WHERE i.client_id = c.id
-           AND i.status <> 'void'
-           AND to_char(i.issue_date, 'YYYY-MM') = $1
-       )`,
-    [month],
-  );
-
-  const out: Reminder[] = [];
-  for (const client of rows) {
-    const raiseOn = billingDateFor(month, client.billing_day);
-    const daysToRaise = daysUntil(raiseOn, today);
-    // Surface it from three days ahead of the billing date onward.
-    if (daysToRaise > 3) continue;
-
-    out.push({
-      kind: "to_raise",
-      title:
-        daysToRaise < 0
-          ? `${client.name}'s retainer invoice is ${Math.abs(daysToRaise)} ${Math.abs(daysToRaise) === 1 ? "day" : "days"} late going out`
-          : `Raise ${client.name}'s retainer invoice`,
-      detail: `Billing day ${client.billing_day}, net ${client.terms_days} — no invoice raised for this month yet.`,
-      clientName: client.name,
-      vip: client.vip,
-      amount: invoiceAmounts ? client.retainer_amount : null,
-      currency: client.currency,
-      dueDate: addDays(raiseOn, client.terms_days),
-      days: daysToRaise,
-      clientId: client.id,
-    });
-  }
-  return out;
-}
-
-export async function nextInvoiceNumber(): Promise<string> {
-  const db = await getDb();
-  const year = new Date().getFullYear();
-  const rows = await db.query<{ number: string }>(
-    `SELECT number FROM foundery.invoices WHERE number LIKE $1 ORDER BY number DESC LIMIT 1`,
-    [`NRD-${year}-%`],
-  );
-  const last = rows[0] ? Number(rows[0].number.split("-").pop()) : 0;
-  return `NRD-${year}-${String((Number.isFinite(last) ? last : 0) + 1).padStart(3, "0")}`;
 }
 
 /* ------------------------------------------------------------ onboarding */

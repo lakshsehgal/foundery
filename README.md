@@ -1,6 +1,6 @@
 # Neuroid Cortex
 
-Neuroid's founders dashboard. Clients, costs, invoices, onboarding and profit
+Neuroid's founders dashboard. Clients, costs, invoice reminders, onboarding and profit
 in one place, with a line down the middle: the operator runs the day, the
 founder sees the money.
 
@@ -79,21 +79,20 @@ un-hidden by anyone reading the page source.
 | Cost **category** totals — including what salaries cost in total | ✅ | ✅ |
 | Individual salary lines: who, and how much | **never** | ✅ |
 | Tools, contractor, marketing, charity line items | ✅ | ✅ |
-| Invoice dates, terms, status, days overdue | ✅ | ✅ |
-| Invoice amounts | switch, on by default | ✅ |
+| Invoice raise-tasks: billing days, raised/unraised, marking | ✅ | ✅ |
 | Onboarding forms, public links and replies | ✅ | ✅ |
 | Margins, revenue projection, risk report | ❌ | ✅ |
 | Profit tracker and P&L | ❌ | ✅ |
 | Settings and the activity log | ❌ | ✅ |
 
-The two switches live on **Settings**. The row that isn't a switch is
+The switch lives on **Settings**. The row that isn't a switch is
 individual pay: the operator sees that the team costs, say, ₹2.8L a month
 across four people — which is the number they need to price work — and never
 sees what any one of them earns. There is no setting for it, by design.
 
 Writes are gated too, not just reads. The operator can add and edit clients,
-raise invoices, chase them, and build onboarding forms. They cannot set a
-client's value, an invoice amount, or any cost — those fields are only read
+mark invoices raised, and build onboarding forms. They cannot set a
+client's value or any cost — those fields are only read
 off the submitted form when a founder submits it, so a forged post gets
 nowhere. Deleting anything is founder-only.
 
@@ -145,18 +144,20 @@ the sub-line. Otherwise a one-off looks like the biggest client you have, and
 its margin can't be compared with anything.
 
 **The P&L uses the cost base as it stood in that month**, not today's — a cost
-that started in March isn't charged against February. A month with no invoices
+that started in March isn't charged against February. A month with no contracts
 and no costs shows a dash, not a zero: "we have no figures" and "we earned
 nothing" are different statements.
 
-**Invoiced vs collected** is a toggle on the P&L, because in a month where a
-client pays late they are two different businesses.
+**P&L revenue reads off the contracted book**, not off invoices: each month
+carries every retainer live in it plus each project's monthly slice, bounded
+by the contract's dates. The actual billing and collection happen in Zoho
+Books, which stays the accounting system of record.
 
 **The reminder that matters most is for an invoice that doesn't exist.**
 Cortex checks each active retainer against its billing day and tells you
-when this month's invoice hasn't gone out — the failure that costs a month of
-cash and never appears on an invoice list, because the missing invoice isn't
-there to be listed.
+when this month's invoice hasn't been raised in Zoho yet — the failure that
+costs a month of cash and never appears on an invoice list, because the
+missing invoice isn't there to be listed.
 
 **Runway is blank until you enter a cash balance** on Settings. A made-up
 runway is worse than no runway.
@@ -200,22 +201,16 @@ Local development, with neither configured, falls back to the passcode form;
 `/login?method=passcode` reaches it anywhere passcodes are set in the
 environment.
 
-## Zoho Books sync
+## Invoices
 
-One-way, Zoho → Cortex: Zoho stays the accounting system of record, and
-Cortex mirrors it to drive the chasing feed and the P&L. A **Sync Zoho**
-button on the invoices page (founder only) plus a nightly cron at 08:00 IST.
-Invoices are matched to clients **by customer name** (case-insensitive);
-unmatched customers are skipped and named so you can add them — sync never
-invents clients. Re-syncs update in place via Zoho's invoice id; invoices you
-raised by hand in Cortex are never touched.
-
-Setup (once):
-1. https://api-console.zoho.in → **Self Client** → note the Client ID/Secret.
-2. Generate a grant code with scope `ZohoBooks.invoices.READ` (10 minutes).
-3. Exchange it: `curl -X POST "https://accounts.zoho.in/oauth/v2/token?grant_type=authorization_code&client_id=…&client_secret=…&code=…"` → copy `refresh_token`.
-4. In Vercel, set `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`,
-   `ZOHO_ORG_ID` (Zoho Books → Settings → Organisation ID) and redeploy.
+Invoicing lives in **Zoho Books** — amounts, PDFs, payment chasing, all of it.
+Cortex keeps exactly one fact per retainer per month: **did the invoice go
+out?** The Invoices page lists every active retainer in billing-day order for
+the current month (and anything missed last month, on top); you raise the
+invoice in Zoho, then hit **Mark raised**. Unticked past the billing day shows
+up on Today and in the founder risk report. Undo puts a mistaken mark back on
+the list. One-off project invoices are raised straight in Zoho as milestones
+land — Cortex doesn't track those.
 
 ## Onboarding links
 

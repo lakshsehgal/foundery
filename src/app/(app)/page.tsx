@@ -1,8 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { AlertTriangle, CalendarClock, CheckCircle2, FilePlus2, Inbox } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FilePlus2, Inbox } from "lucide-react";
 import { requireRole } from "@/lib/auth";
-import { policyFor } from "@/lib/policy";
 import { listClients, listSubmissions, reminders, costTotals, monthlyBurn } from "@/lib/queries";
 import { fmtMoney } from "@/lib/money";
 import { prettyDate, todayISO } from "@/lib/dates";
@@ -16,17 +15,15 @@ export const metadata: Metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
 
 const KIND_STYLE = {
-  overdue: { tone: "var(--color-critical)", label: "Overdue", icon: AlertTriangle },
-  due_soon: { tone: "var(--color-warning)", label: "Due soon", icon: CalendarClock },
-  to_raise: { tone: "var(--color-series-1)", label: "To raise", icon: FilePlus2 },
+  missed: { tone: "var(--color-critical)", label: "Never raised", icon: AlertTriangle },
+  to_raise: { tone: "var(--color-warning)", label: "To raise", icon: FilePlus2 },
 } as const;
 
 export default async function TodayPage() {
   const role = await requireRole();
   const today = todayISO();
 
-  const [policy, feed, clients, burn, totals, submissions] = await Promise.all([
-    policyFor(role),
+  const [feed, clients, burn, totals, submissions] = await Promise.all([
     reminders(role, today),
     listClients(role),
     monthlyBurn(),
@@ -36,7 +33,7 @@ export default async function TodayPage() {
 
   const active = clients.filter((c) => c.status === "active");
   const recentSubmissions = submissions.slice(0, 4);
-  const overdueCount = feed.filter((r) => r.kind === "overdue").length;
+  const lateCount = feed.filter((r) => r.kind === "missed" || r.days < 0).length;
 
   return (
     <>
@@ -70,10 +67,10 @@ export default async function TodayPage() {
             hint={`Across ${totals.filter((c) => c.count > 0).length} categories`}
           />
           <StatTile
-            label="Needs chasing"
-            count={<Ticker value={overdueCount} />}
-            tone={overdueCount > 0 ? "var(--color-critical)" : "var(--color-good)"}
-            hint={overdueCount > 0 ? "Invoices past their due date" : "Nothing is past due"}
+            label="Late to raise"
+            count={<Ticker value={lateCount} />}
+            tone={lateCount > 0 ? "var(--color-critical)" : "var(--color-good)"}
+            hint={lateCount > 0 ? "Invoices past their billing day" : "Nothing is late going out"}
           />
           <StatTile
             label="On the list"
@@ -87,7 +84,7 @@ export default async function TodayPage() {
           <div className="p-4 pb-0">
             <CardTitle
               title="What needs you"
-              hint="Invoices past due, invoices about to be due, and retainers that still haven't been billed this month."
+              hint="Retainer invoices that still need raising in Zoho Books — last month's misses first, then this month's billing days."
             />
           </div>
 
@@ -95,7 +92,7 @@ export default async function TodayPage() {
             <EmptyState
               icon={<CheckCircle2 size={22} />}
               title="Nothing is waiting"
-              hint="Every invoice is either paid or inside its terms, and this month's retainers have all been raised."
+              hint="Every retainer invoice for this month is marked raised, and nothing slipped last month."
             />
           ) : (
             <ul className="stagger divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
@@ -103,7 +100,7 @@ export default async function TodayPage() {
                 const style = KIND_STYLE[item.kind];
                 const Icon = style.icon;
                 return (
-                  <li key={`${item.kind}-${item.invoiceId ?? item.clientId}-${index}`}>
+                  <li key={`${item.kind}-${item.clientId}-${item.month}-${index}`}>
                     <Link
                       href="/invoices"
                       className="flex items-start gap-3 border-l-[3px] px-4 py-3 transition-colors hover:bg-[var(--color-surface-2)]"
@@ -133,15 +130,14 @@ export default async function TodayPage() {
 
                       <div className="shrink-0 text-right">
                         <p className="tabular text-[13px] font-semibold">
-                          {policy.invoiceAmounts && item.amount !== null ? (
+                          {item.amount !== null ? (
                             fmtMoney(item.amount)
                           ) : (
                             <Redacted />
                           )}
                         </p>
                         <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
-                          {item.kind === "to_raise" ? "would fall due " : "due "}
-                          {prettyDate(item.dueDate)}
+                          bill day {prettyDate(item.raiseOn)}
                         </p>
                       </div>
                     </Link>

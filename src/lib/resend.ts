@@ -5,7 +5,8 @@ import { getSettings } from "./db";
  * Email, through Resend.
  *
  * The key comes from the environment when set, else from the settings table —
- * same pattern as Zoho, so the founder can connect it from the Settings page.
+ * environment first, then the settings table, so the founder can connect it
+ * from the Settings page without a redeploy.
  * The from-address must belong to a domain verified in Resend; until one is,
  * Resend's own `onboarding@resend.dev` works but only delivers to the Resend
  * account owner's address.
