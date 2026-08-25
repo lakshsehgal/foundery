@@ -19,11 +19,13 @@ export default async function ClientsPage() {
   ]);
   const currency = defaultCurrency();
 
-  // Latest onboarding per client, with its shareable link, for the cards.
-  const onboardings: Record<number, { status: string; url: string }> = {};
+  // Latest onboarding per client per flow, with its shareable link — a client
+  // can run performance and creative side by side, each with its own link.
+  const onboardings: Record<number, Record<string, { status: string; url: string }>> = {};
   for (const record of guided) {
-    if (!onboardings[record.client_id]) {
-      onboardings[record.client_id] = {
+    const perClient = (onboardings[record.client_id] ??= {});
+    if (!perClient[record.flow]) {
+      perClient[record.flow] = {
         status: record.status,
         url: publicWelcomeUrl(record.token),
       };

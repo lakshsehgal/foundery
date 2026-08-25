@@ -2,31 +2,36 @@
 
 import { useActionState, useState } from "react";
 import {
-  ArrowRight, Check, CheckCircle2, Copy, KeyRound, Package, Save, ShoppingBag, Star,
+  ArrowRight, Check, CheckCircle2, Copy, KeyRound, Package, Palette, Save, ShoppingBag, Star,
 } from "lucide-react";
 import { saveWelcomeAccess, submitWelcomeDetails, type WelcomeState } from "@/app/actions/onboarding";
 import { Button, Field, TextArea, TextInput } from "@/components/ui/form";
-import { ACCESS_NOTES_KEY, ONBOARDING_DETAIL_FIELDS } from "@/lib/taxonomy";
+import { ACCESS_NOTES_KEY, type OnboardingField } from "@/lib/taxonomy";
 import type { GuidedOnboarding } from "@/lib/queries";
 
-/** ACCESS_GROUPS with every "{value}" already substituted on the server. */
+/** The flow's access groups with every "{value}" already substituted on the server. */
 export type ResolvedAccessGroup = {
   key: string;
   label: string;
   value: string;
   highlight: { title: string; text: string } | null;
   banner: { text: string; tone: "info" | "good" } | null;
-  items: { key: string; label: string; instruction: string }[];
+  items: { key: string; label: string; instruction: string; input: "url" | "text" | null }[];
 };
 
-export function DetailsStep({ onboarding }: { onboarding: GuidedOnboarding }) {
+export function DetailsStep({
+  onboarding, fields,
+}: {
+  onboarding: GuidedOnboarding;
+  fields: OnboardingField[];
+}) {
   const [state, action, pending] = useActionState<WelcomeState, FormData>(submitWelcomeDetails, {});
 
   return (
     <form action={action} className="space-y-5">
       <input type="hidden" name="token" value={onboarding.token} />
 
-      {ONBOARDING_DETAIL_FIELDS.map((field) => (
+      {fields.map((field) => (
         <Field
           key={field.key}
           label={field.required ? field.label : `${field.label} (optional)`}
@@ -104,11 +109,15 @@ function BannerText({ text, value }: { text: string; value: string }) {
   );
 }
 
-const GROUP_BADGE: Record<string, { tone: string; icon: "facebook" | "g" | "shopify" | "box" }> = {
+const GROUP_BADGE: Record<
+  string,
+  { tone: string; icon: "facebook" | "g" | "shopify" | "box" | "palette" }
+> = {
   meta: { tone: "var(--color-series-1)", icon: "facebook" },
   google: { tone: "var(--color-critical)", icon: "g" },
   shopify: { tone: "var(--color-good)", icon: "shopify" },
   other: { tone: "var(--color-warning)", icon: "box" },
+  brand: { tone: "var(--color-series-5)", icon: "palette" },
 };
 
 function GroupBadge({ groupKey }: { groupKey: string }) {
@@ -129,6 +138,7 @@ function GroupBadge({ groupKey }: { groupKey: string }) {
       {badge.icon === "g" && "G"}
       {badge.icon === "shopify" && <ShoppingBag size={14} />}
       {badge.icon === "box" && <Package size={14} />}
+      {badge.icon === "palette" && <Palette size={14} />}
     </span>
   );
 }
@@ -250,6 +260,34 @@ export function AccessStep({
 
           {group.items.map((item) => {
             const saved = onboarding.access[item.key];
+            if (item.input) {
+              // A handover, not a tick: it counts as done once it's filled in.
+              return (
+                <div
+                  key={item.key}
+                  className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-surface)] p-3.5"
+                >
+                  <Field label={item.label} hint={item.instruction} htmlFor={`val_${item.key}`}>
+                    {item.input === "url" ? (
+                      <TextInput
+                        id={`val_${item.key}`}
+                        name={`val_${item.key}`}
+                        type="url"
+                        placeholder="https://…"
+                        defaultValue={saved?.note ?? ""}
+                      />
+                    ) : (
+                      <TextArea
+                        id={`val_${item.key}`}
+                        name={`val_${item.key}`}
+                        rows={3}
+                        defaultValue={saved?.note ?? ""}
+                      />
+                    )}
+                  </Field>
+                </div>
+              );
+            }
             return (
               <label
                 key={item.key}

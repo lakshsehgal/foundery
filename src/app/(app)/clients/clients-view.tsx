@@ -8,7 +8,8 @@ import type { ActionState } from "@/app/actions/clients";
 import { Button, Select, TextInput } from "@/components/ui/form";
 import { avatarTint, Chip, EmptyState, Redacted } from "@/components/ui/primitives";
 import {
-  CLIENT_STATUS, ENGAGEMENT, HEALTH, ONBOARDING_STATUS, type ClientStatus, type OnboardingStatus,
+  CLIENT_STATUS, ENGAGEMENT, HEALTH, ONBOARDING_FLOWS, ONBOARDING_STATUS,
+  type ClientStatus, type OnboardingFlow, type OnboardingStatus,
 } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
 import { prettyDate } from "@/lib/dates";
@@ -38,7 +39,13 @@ function marginTone(margin: number): string {
  * way monday groups rows — the book of business readable at a glance, not a
  * spreadsheet to be scanned.
  */
-function StartOnboardingButton({ clientId, clientName }: { clientId: number; clientName: string }) {
+function StartOnboardingButton({
+  clientId, clientName, flow,
+}: {
+  clientId: number;
+  clientName: string;
+  flow: OnboardingFlow;
+}) {
   const [state, action, pending] = useActionState<ActionState, FormData>(startOnboarding, {});
 
   useEffect(() => {
@@ -49,14 +56,15 @@ function StartOnboardingButton({ clientId, clientName }: { clientId: number; cli
   return (
     <form action={action} onClick={(event) => event.stopPropagation()}>
       <input type="hidden" name="client_id" value={clientId} />
+      <input type="hidden" name="flow" value={flow} />
       <button
         type="submit"
         disabled={pending}
-        title={`Start onboarding for ${clientName}`}
+        title={`Start ${ONBOARDING_FLOWS[flow].label} onboarding for ${clientName}`}
         className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[11.5px] font-semibold text-[var(--color-ink-2)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-ink)] disabled:opacity-50"
       >
         <Rocket size={12} />
-        Start onboarding
+        Start {ONBOARDING_FLOWS[flow].short.toLowerCase()}
       </button>
     </form>
   );
@@ -97,8 +105,8 @@ export function ClientsView({
   currencySymbol: string;
   /** Worked out and formatted on the server. Absent = not cleared to see it. */
   money: Record<number, ClientMoney>;
-  /** Latest guided onboarding per client, if any. */
-  onboardings: Record<number, { status: string; url: string }>;
+  /** Latest guided onboarding per client per flow, if any. */
+  onboardings: Record<number, Record<string, { status: string; url: string }>>;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("working");
@@ -331,28 +339,42 @@ export function ClientsView({
                         )}
                       </div>
 
-                      {/* Onboarding strip: start it, track it, copy the link. */}
+                      {/* Onboarding strip: one row per flow — start, track, copy. */}
                       <div
-                        className="mt-3 -mx-1 flex flex-wrap items-center gap-1 border-t border-[var(--color-line)] pt-2.5"
+                        className="mt-3 -mx-1 space-y-1 border-t border-[var(--color-line)] pt-2.5"
                         onClick={(event) => event.stopPropagation()}
                       >
-                        {onboarding ? (
-                          <>
-                            <Chip
-                              tone={
-                                ONBOARDING_STATUS[onboarding.status as OnboardingStatus]?.tone ??
-                                "var(--color-ink-3)"
-                              }
-                            >
-                              {ONBOARDING_STATUS[onboarding.status as OnboardingStatus]?.label ??
-                                onboarding.status}
-                            </Chip>
-                            <span className="ml-auto" />
-                            <CopyLinkButton url={onboarding.url} />
-                          </>
-                        ) : (
-                          <StartOnboardingButton clientId={client.id} clientName={client.name} />
-                        )}
+                        {(Object.keys(ONBOARDING_FLOWS) as OnboardingFlow[]).map((flow) => {
+                          const record = onboarding?.[flow];
+                          return (
+                            <div key={flow} className="flex flex-wrap items-center gap-1">
+                              {record ? (
+                                <>
+                                  <span className="px-1 text-[11px] font-semibold text-[var(--color-ink-3)]">
+                                    {ONBOARDING_FLOWS[flow].short}
+                                  </span>
+                                  <Chip
+                                    tone={
+                                      ONBOARDING_STATUS[record.status as OnboardingStatus]?.tone ??
+                                      "var(--color-ink-3)"
+                                    }
+                                  >
+                                    {ONBOARDING_STATUS[record.status as OnboardingStatus]?.label ??
+                                      record.status}
+                                  </Chip>
+                                  <span className="ml-auto" />
+                                  <CopyLinkButton url={record.url} />
+                                </>
+                              ) : (
+                                <StartOnboardingButton
+                                  clientId={client.id}
+                                  clientName={client.name}
+                                  flow={flow}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

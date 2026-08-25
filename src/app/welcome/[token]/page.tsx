@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getGuidedByToken } from "@/lib/queries";
 import { getSettings } from "@/lib/db";
-import { ACCESS_GROUPS } from "@/lib/taxonomy";
+import { accessGroupsFor, detailFieldsFor } from "@/lib/taxonomy";
 import { Logo } from "@/components/ui/primitives";
 import { AccessStep, DetailsStep, DoneCard, type ResolvedAccessGroup } from "./welcome-flow";
 
@@ -28,7 +28,7 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
   // "share to our BM ID: 1100…" rather than a hunt. Settings override the
   // built-in defaults per group.
   const settings = await getSettings();
-  const groups: ResolvedAccessGroup[] = ACCESS_GROUPS.map((group) => {
+  const groups: ResolvedAccessGroup[] = accessGroupsFor(onboarding.flow).map((group) => {
     const value = group.settingKey
       ? settings.get(group.settingKey) || group.settingDefault || ""
       : "";
@@ -42,9 +42,11 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
         key: item.key,
         label: item.label,
         instruction: item.hint.replaceAll("{value}", value),
+        input: item.input ?? null,
       })),
     };
   });
+  const detailFields = detailFieldsFor(onboarding.flow).map((field) => ({ ...field }));
 
   const stepIndex = onboarding.status === "invited" ? 0 : onboarding.status === "details_done" ? 1 : 2;
 
@@ -107,7 +109,7 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
           ) : (
             <div className="rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)] p-6 sm:p-8">
               {stepIndex === 0 ? (
-                <DetailsStep onboarding={onboarding} />
+                <DetailsStep onboarding={onboarding} fields={detailFields} />
               ) : (
                 <AccessStep onboarding={onboarding} groups={groups} />
               )}

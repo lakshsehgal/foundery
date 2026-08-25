@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Check, ChevronDown, Copy, ExternalLink } from "lucide-react";
 import { Card, Chip, SectionLabel } from "@/components/ui/primitives";
 import {
-  ACCESS_ITEMS, ACCESS_NOTES_KEY, ONBOARDING_DETAIL_FIELDS, ONBOARDING_STATUS,
+  ACCESS_NOTES_KEY, ONBOARDING_FLOWS, ONBOARDING_STATUS, accessItemsFor, detailFieldsFor,
 } from "@/lib/taxonomy";
 import type { GuidedOnboarding } from "@/lib/queries";
 
@@ -33,7 +33,9 @@ export function GuidedList({
     <div className="space-y-3">
       {onboardings.map((onboarding) => {
         const status = ONBOARDING_STATUS[onboarding.status];
-        const doneCount = ACCESS_ITEMS.filter((item) => onboarding.access[item.key]?.done).length;
+        const accessItems = accessItemsFor(onboarding.flow);
+        const detailFields = detailFieldsFor(onboarding.flow);
+        const doneCount = accessItems.filter((item) => onboarding.access[item.key]?.done).length;
         const isOpen = expanded === onboarding.id;
 
         return (
@@ -45,10 +47,11 @@ export function GuidedList({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[14px] font-bold">{onboarding.client_name}</p>
                 <p className="mt-0.5 text-[11.5px] text-[var(--color-ink-3)]">
-                  Accesses: {doneCount}/{ACCESS_ITEMS.length} · started{" "}
+                  Accesses: {doneCount}/{accessItems.length} · started{" "}
                   {onboarding.created_at.slice(0, 10)}
                 </p>
               </div>
+              <Chip tone="var(--color-series-3)">{ONBOARDING_FLOWS[onboarding.flow].short}</Chip>
               <Chip tone={status.tone} size="md">{status.label}</Chip>
               <ChevronDown
                 size={15}
@@ -90,7 +93,7 @@ export function GuidedList({
                       </p>
                     ) : (
                       <dl className="space-y-2.5">
-                        {ONBOARDING_DETAIL_FIELDS.map((field) => {
+                        {detailFields.map((field) => {
                           const answer = onboarding.details[field.key];
                           if (!answer) return null;
                           return (
@@ -117,7 +120,7 @@ export function GuidedList({
                   <div>
                     <SectionLabel className="mb-2.5">Accesses</SectionLabel>
                     <ul className="space-y-2">
-                      {ACCESS_ITEMS.map((item) => {
+                      {accessItems.map((item) => {
                         const entry = onboarding.access[item.key];
                         return (
                           <li key={item.key} className="flex items-start gap-2.5">
@@ -136,11 +139,21 @@ export function GuidedList({
                               <span className={`block text-[12.5px] ${entry?.done ? "" : "text-[var(--color-ink-2)]"}`}>
                                 {item.label}
                               </span>
-                              {entry?.note && (
-                                <span className="block text-[11.5px] text-[var(--color-ink-3)]">
-                                  “{entry.note}”
-                                </span>
-                              )}
+                              {entry?.note &&
+                                (item.input === "url" ? (
+                                  <a
+                                    href={entry.note}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block truncate text-[11.5px] underline underline-offset-4"
+                                  >
+                                    {entry.note}
+                                  </a>
+                                ) : (
+                                  <span className="block text-[11.5px] text-[var(--color-ink-3)]">
+                                    “{entry.note}”
+                                  </span>
+                                ))}
                             </span>
                           </li>
                         );

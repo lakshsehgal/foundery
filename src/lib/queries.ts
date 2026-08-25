@@ -6,6 +6,7 @@ import { monthlyEquivalent } from "./money";
 import { billingDateFor, daysUntil, monthKey, todayISO, addDays } from "./dates";
 import type {
   ClientStatus, CostCategory, Engagement, Health, InvoiceStatus, OnboardingField,
+  OnboardingFlow,
 } from "./taxonomy";
 import { CATEGORY_LABEL, COST_CATEGORIES } from "./taxonomy";
 
@@ -579,6 +580,7 @@ export type GuidedOnboarding = {
   client_id: number;
   client_name: string;
   token: string;
+  flow: OnboardingFlow;
   status: "invited" | "details_done" | "completed";
   details: Record<string, string>;
   access: Record<string, { done: boolean; note?: string }>;
@@ -593,51 +595,65 @@ function toRecord<T>(value: unknown): Record<string, T> {
 }
 
 function toGuided(row: {
-  id: number; client_id: number; client_name: string; token: string; status: string;
-  details: unknown; access: unknown; created_at: string; completed_at: string | null;
+  id: number; client_id: number; client_name: string; token: string; flow?: string;
+  status: string; details: unknown; access: unknown; created_at: string;
+  completed_at: string | null;
 }): GuidedOnboarding {
   return {
     ...row,
+    flow: row.flow === "creative" ? "creative" : "performance",
     status: row.status as GuidedOnboarding["status"],
     details: toRecord<string>(row.details),
     access: toRecord<{ done: boolean; note?: string }>(row.access),
   };
 }
 
+/**
+ * Selected with and without the flow column: a database that predates flows
+ * (the column ships in db/schema.sql) still serves its onboardings, all read
+ * as performance, instead of taking the page down.
+ */
+function guidedSelect(withFlow: boolean, where = ""): string {
+  return `SELECT o.id, o.client_id, c.name AS client_name, o.token, ${
+    withFlow ? "o.flow," : ""
+  } o.status, o.details, o.access, o.created_at, o.completed_at
+     FROM foundery.onboardings o
+     JOIN foundery.clients c ON c.id = o.client_id ${where}`;
+}
+
 export async function listGuidedOnboardings(): Promise<GuidedOnboarding[]> {
   const db = await getDb();
+  const order = "ORDER BY o.created_at DESC";
   try {
-    const rows = await db.query<Parameters<typeof toGuided>[0]>(
-      `SELECT o.id, o.client_id, c.name AS client_name, o.token, o.status,
-              o.details, o.access, o.created_at, o.completed_at
-       FROM foundery.onboardings o
-       JOIN foundery.clients c ON c.id = o.client_id
-       ORDER BY o.created_at DESC`,
-    );
+    const rows = await db.query<Parameters<typeof toGuided>[0]>(guidedSelect(true, order));
     return rows.map(toGuided);
   } catch {
-    // The table ships in db/schema.sql; a database that hasn't had the
-    // updated schema applied yet shouldn't take the clients page down with
-    // it. Empty until `npm run db:setup` (or the SQL editor) catches up.
-    console.warn("foundery.onboardings missing — re-run db/schema.sql to enable guided onboarding");
-    return [];
+    try {
+      const rows = await db.query<Parameters<typeof toGuided>[0]>(guidedSelect(false, order));
+      return rows.map(toGuided);
+    } catch {
+      // The table ships in db/schema.sql; a database that hasn't had the
+      // updated schema applied yet shouldn't take the clients page down with
+      // it. Empty until `npm run db:setup` (or the SQL editor) catches up.
+      console.warn("foundery.onboardings missing — re-run db/schema.sql to enable guided onboarding");
+      return [];
+    }
   }
 }
 
 export async function getGuidedByToken(token: string): Promise<GuidedOnboarding | null> {
   const db = await getDb();
+  const where = "WHERE o.token = $1";
   try {
-    const rows = await db.query<Parameters<typeof toGuided>[0]>(
-      `SELECT o.id, o.client_id, c.name AS client_name, o.token, o.status,
-              o.details, o.access, o.created_at, o.completed_at
-       FROM foundery.onboardings o
-       JOIN foundery.clients c ON c.id = o.client_id
-       WHERE o.token = $1`,
-      [token],
-    );
+    const rows = await db.query<Parameters<typeof toGuided>[0]>(guidedSelect(true, where), [token]);
     return rows[0] ? toGuided(rows[0]) : null;
   } catch {
-    return null;
+    try {
+      const rows = await db.query<Parameters<typeof toGuided>[0]>(guidedSelect(false, where), [token]);
+      return rows[0] ? toGuided(rows[0]) : null;
+    } catch {
+      return null;
+    }
   }
 }
 

@@ -174,19 +174,58 @@ export type OnboardingField = {
 /* ------------------------------------------------------- guided onboarding */
 
 /**
+ * Guided onboarding comes in two flavours: the full performance-marketing
+ * flow (platform accesses, pixels, analytics) and the lighter creative flow
+ * (brand assets and a view-only ad account). Each flow carries its own
+ * details form and its own accesses step.
+ */
+export type OnboardingFlow = "performance" | "creative";
+
+export const ONBOARDING_FLOWS: Record<
+  OnboardingFlow,
+  { label: string; short: string; hint: string }
+> = {
+  performance: {
+    label: "Performance marketing",
+    short: "Performance",
+    hint: "The full platform checklist — ad accounts, pixels, analytics.",
+  },
+  creative: {
+    label: "Creative",
+    short: "Creative",
+    hint: "Brand assets plus a view-only ad account for creative analytics.",
+  },
+};
+
+/**
  * Step 1 of the guided flow: the details every new client gives us before
  * anything else moves. Fixed on purpose — this is the contract-and-billing
  * information, not a form the team improvises per client.
  */
 export const ONBOARDING_DETAIL_FIELDS = [
-  { key: "contact_name", label: "Full name", type: "text", required: true, hint: "Who we speak to day to day." },
+  { key: "authorized_signatory", label: "Authorised signatory name", type: "text", required: true, hint: "Who signs the agreement on your side." },
+  { key: "signatory_position", label: "Authorised signatory position", type: "text", required: true, hint: "Founder, director, marketing head…" },
   { key: "email", label: "Email", type: "email", required: true, hint: "" },
   { key: "phone", label: "Phone number", type: "text", required: true, hint: "WhatsApp-reachable, ideally." },
-  { key: "authorized_signatory", label: "Authorised signatory", type: "text", required: true, hint: "Who signs the agreement on your side." },
-  { key: "gst_certificate", label: "GST certificate", type: "url", required: true, hint: "Upload it to Drive or Dropbox and paste the link here." },
+  { key: "gstin", label: "GSTIN", type: "text", required: true, hint: "The 15-character GST number." },
   { key: "shopify_domain", label: "Shopify domain", type: "text", required: true, hint: "e.g. yourbrand.myshopify.com" },
-  { key: "google_ads_id", label: "Google Ads account ID", type: "text", required: false, hint: "The 10-digit ID, like 123-456-7890. Skip if you don't run Google yet." },
+  { key: "shopify_collab_code", label: "Shopify collaborator code", type: "text", required: true, hint: "Shopify admin → Settings → Users and permissions → Collaborators." },
+  { key: "google_ads_id", label: "Google Ads account ID", type: "text", required: false, hint: "The 10-digit ID, like 123-456-7890. Only if Google Ads is in your scope." },
 ] as const satisfies readonly OnboardingField[];
+
+/** The creative flow asks for the contract-and-billing identity, nothing else. */
+export const CREATIVE_DETAIL_FIELDS = [
+  { key: "authorized_signatory", label: "Authorised signatory name", type: "text", required: true, hint: "Who signs the agreement on your side." },
+  { key: "signatory_position", label: "Authorised person's position", type: "text", required: true, hint: "Founder, director, marketing head…" },
+  { key: "email", label: "Email", type: "email", required: true, hint: "" },
+  { key: "phone", label: "Phone number", type: "text", required: true, hint: "WhatsApp-reachable, ideally." },
+  { key: "legal_company_name", label: "Legal company name", type: "text", required: true, hint: "Exactly as it reads on your GST certificate." },
+  { key: "gstin", label: "GSTIN", type: "text", required: true, hint: "The 15-character GST number." },
+] as const satisfies readonly OnboardingField[];
+
+export function detailFieldsFor(flow: OnboardingFlow): readonly OnboardingField[] {
+  return flow === "creative" ? CREATIVE_DETAIL_FIELDS : ONBOARDING_DETAIL_FIELDS;
+}
 
 /**
  * Step 2: the accesses we need before delivery can start, grouped by
@@ -198,6 +237,12 @@ export type AccessItem = {
   key: string;
   label: string;
   hint: string;
+  /**
+   * Without it the item is a checkbox the client ticks. With it the item is
+   * something they hand over — a link or a piece of text — and counts as done
+   * once filled in.
+   */
+  input?: "url" | "text";
 };
 
 export type AccessGroup = {
@@ -300,8 +345,59 @@ export const ACCESS_GROUPS: AccessGroup[] = [
   },
 ];
 
+/** The creative flow: one view-only Meta access, then the brand handover. */
+export const CREATIVE_ACCESS_GROUPS: AccessGroup[] = [
+  {
+    key: "meta",
+    label: "Meta (Facebook & Instagram)",
+    settingKey: "neuroid_meta_bm_id",
+    settingDefault: "1100898224148253",
+    highlight: {
+      title: "Our Business Manager ID",
+      text: "Please share view-only access to your ad account to our BM — we use it for creative analytics:",
+    },
+    items: [
+      {
+        key: "meta_ad_account_view",
+        label: "Meta Ad Account Access (view only)",
+        hint: "Share view-only access to your ad account to our BM ID: {value} — enough for creative analytics, nothing more.",
+      },
+    ],
+  },
+  {
+    key: "brand",
+    label: "Brand & Assets",
+    items: [
+      {
+        key: "brand_guide",
+        label: "Link to brand guide",
+        hint: "A Drive, Dropbox or Notion link to your brand guidelines.",
+        input: "url",
+      },
+      {
+        key: "asset_files",
+        label: "Link to asset files",
+        hint: "Logos, font files, product shots — one folder link is perfect.",
+        input: "url",
+      },
+      {
+        key: "avoid_list",
+        label: "Anything to avoid",
+        hint: "Words, phrases or elements we should never use in your ads.",
+        input: "text",
+      },
+    ],
+  },
+];
+
+export function accessGroupsFor(flow: OnboardingFlow): AccessGroup[] {
+  return flow === "creative" ? CREATIVE_ACCESS_GROUPS : ACCESS_GROUPS;
+}
+
 /** The flat checklist — saving, completion and the internal views read this. */
-export const ACCESS_ITEMS: AccessItem[] = ACCESS_GROUPS.flatMap((group) => group.items);
+export function accessItemsFor(flow: OnboardingFlow): AccessItem[] {
+  return accessGroupsFor(flow).flatMap((group) => group.items);
+}
 
 /** Free-text extras live in the same jsonb under a key no checkbox can claim. */
 export const ACCESS_NOTES_KEY = "_notes";

@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
 import { getDb, logAudit, named } from "@/lib/db";
 import {
-  ACCESS_ITEMS, ACCESS_NOTES_KEY, FIELD_TYPES, ONBOARDING_DETAIL_FIELDS, type OnboardingField,
+  ACCESS_NOTES_KEY, FIELD_TYPES, ONBOARDING_FLOWS, accessItemsFor, detailFieldsFor,
+  type OnboardingField, type OnboardingFlow,
 } from "@/lib/taxonomy";
 import { getFormByToken, getGuidedByToken, publicWelcomeUrl } from "@/lib/queries";
 import type { ActionState } from "./clients";
@@ -179,6 +180,9 @@ export async function startOnboarding(_prev: ActionState, form: FormData): Promi
   const role = await requireRole();
   const clientId = Number(form.get("client_id") ?? 0);
   if (!clientId) return { error: "No client given." };
+  const rawFlow = String(form.get("flow") ?? "performance");
+  const flow: OnboardingFlow = rawFlow === "creative" ? "creative" : "performance";
+  const flowLabel = ONBOARDING_FLOWS[flow].label;
 
   const db = await getDb();
   const [client] = await db.query<{ name: string }>(
@@ -188,26 +192,29 @@ export async function startOnboarding(_prev: ActionState, form: FormData): Promi
   if (!client) return { error: "That client no longer exists." };
 
   try {
+    // One live onboarding per client per flow — a client can run performance
+    // and creative side by side, each with its own link.
     const [existing] = await db.query<{ token: string }>(
-      `SELECT token FROM foundery.onboardings WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [clientId],
+      `SELECT token FROM foundery.onboardings
+       WHERE client_id = $1 AND flow = $2 ORDER BY created_at DESC LIMIT 1`,
+      [clientId, flow],
     );
     if (existing) {
-      return { ok: `Onboarding link ready for ${client.name}.` };
+      return { ok: `${flowLabel} onboarding link ready for ${client.name}.` };
     }
 
     await db.query(
-      `INSERT INTO foundery.onboardings (client_id, token) VALUES ($1, $2)`,
-      [clientId, newPublicToken()],
+      `INSERT INTO foundery.onboardings (client_id, token, flow) VALUES ($1, $2, $3)`,
+      [clientId, newPublicToken(), flow],
     );
-    await logAudit(role, "onboarding_started", "client", clientId, client.name);
+    await logAudit(role, "onboarding_started", "client", clientId, `${client.name} (${flow})`);
     revalidatePath("/clients");
     revalidatePath("/onboarding");
-    return { ok: `Onboarding created for ${client.name} — copy the link and send it.` };
+    return { ok: `${flowLabel} onboarding created for ${client.name} — copy the link and send it.` };
   } catch {
     return {
       error:
-        "The onboarding table isn't in the database yet — run db/schema.sql against it once (npm run db:setup or the Supabase SQL editor).",
+        "The database is missing the onboarding table or its flow column — run db/schema.sql against it once (npm run db:setup or the Supabase SQL editor).",
     };
   }
 }
@@ -224,7 +231,7 @@ export async function submitWelcomeDetails(
   if (!onboarding) return { error: "This link isn't valid — ask your contact at Neuroid for a fresh one." };
 
   const details: Record<string, string> = {};
-  for (const field of ONBOARDING_DETAIL_FIELDS) {
+  for (const field of detailFieldsFor(onboarding.flow)) {
     const value = String(form.get(`f_${field.key}`) ?? "").trim();
     if (field.required && !value) return { error: `“${field.label}” is needed before you can continue.` };
     if (value) details[field.key] = value.slice(0, 2000);
@@ -255,13 +262,20 @@ export async function saveWelcomeAccess(
   const onboarding = await getGuidedByToken(token);
   if (!onboarding) return { error: "This link isn't valid — ask your contact at Neuroid for a fresh one." };
 
+  const items = accessItemsFor(onboarding.flow);
   const access: Record<string, { done: boolean; note?: string }> = {};
-  for (const item of ACCESS_ITEMS) {
-    access[item.key] = { done: form.get(`done_${item.key}`) !== null };
+  for (const item of items) {
+    if (item.input) {
+      // A handover item — a link or a piece of text — is done once it's filled.
+      const value = String(form.get(`val_${item.key}`) ?? "").trim().slice(0, 2000);
+      access[item.key] = value ? { done: true, note: value } : { done: false };
+    } else {
+      access[item.key] = { done: form.get(`done_${item.key}`) !== null };
+    }
   }
   const notes = String(form.get("access_notes") ?? "").trim().slice(0, 1000);
   if (notes) access[ACCESS_NOTES_KEY] = { done: false, note: notes };
-  const allDone = ACCESS_ITEMS.every((item) => access[item.key]?.done);
+  const allDone = items.every((item) => access[item.key]?.done);
 
   const db = await getDb();
   await db.query(

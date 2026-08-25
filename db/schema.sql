@@ -127,6 +127,7 @@ create table if not exists foundery.onboardings (
   id           bigint generated always as identity primary key,
   client_id    bigint not null references foundery.clients(id) on delete cascade,
   token        text not null unique,          -- the personalised URL segment
+  flow         text not null default 'performance',  -- performance | creative
   status       text not null default 'invited',   -- invited | details_done | completed
   details      jsonb not null default '{}'::jsonb,
   access       jsonb not null default '{}'::jsonb,
@@ -135,6 +136,8 @@ create table if not exists foundery.onboardings (
   completed_at timestamptz
 );
 create index if not exists idx_onboardings_client on foundery.onboardings(client_id);
+-- Databases created before flows existed pick the column up here.
+alter table foundery.onboardings add column if not exists flow text not null default 'performance';
 
 -- Who can sign in, managed from the dashboard. The environment allowlists
 -- remain the bootstrap fallback, so the very first login works with an empty
