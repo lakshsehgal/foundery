@@ -33,6 +33,19 @@ export async function saveBusiness(_prev: ActionState, form: FormData): Promise<
   return { ok: "Saved." };
 }
 
+/** The quick edit on the Cashflow page: the bank balance and the salary day. */
+export async function saveCashPosition(_prev: ActionState, form: FormData): Promise<ActionState> {
+  await requireFounder();
+  const balance = String(form.get("bank_balance") ?? "").replace(/[^0-9.]/g, "");
+  await setSetting("cash_buffer", balance);
+  const salaryDay = Math.min(28, Math.max(1, Number(form.get("salary_day") ?? 1) || 1));
+  await setSetting("salary_day", String(salaryDay));
+  await logAudit("founder", "cash_position_updated");
+  revalidatePath("/cashflow");
+  revalidatePath("/founder");
+  return { ok: "Updated — the calendar recalculates from today's balance." };
+}
+
 /**
  * The month-close row: the handful of numbers that aren't derivable from
  * invoices and costs — money in from outside the invoice list, one-off spend,
