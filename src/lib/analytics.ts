@@ -164,6 +164,72 @@ export function efficiency(
   };
 }
 
+/* -------------------------------------------------------- media buyer load */
+
+export type BuyerLoad = {
+  id: number;
+  name: string;
+  capacity: number;
+  clients: number;
+  /** Monthly retainer revenue riding on this buyer. */
+  mrr: number;
+};
+
+export type MediaBuyerLoad = {
+  buyers: BuyerLoad[];
+  unassigned: { clients: number; mrr: number };
+  totalRetainers: number;
+  totalCapacity: number;
+  /** Positive = seats free across the bench; negative = clients over capacity. */
+  headroom: number;
+};
+
+/**
+ * Who carries what. Only active retainers count — a one-off project's buying
+ * is scoped into the project, not a seat on the bench. Null until the
+ * media_buyers table exists (it ships in db/schema.sql).
+ */
+export async function mediaBuyerLoad(): Promise<MediaBuyerLoad | null> {
+  const db = await getDb();
+  try {
+    const [buyers, clients] = await Promise.all([
+      db.query<{ id: number; name: string; capacity: number }>(
+        `SELECT id, name, capacity FROM foundery.media_buyers
+         WHERE active ORDER BY created_at ASC, id ASC`,
+      ),
+      db.query<{ media_buyer_id: number | null; retainer_amount: number }>(
+        `SELECT media_buyer_id, retainer_amount FROM foundery.clients
+         WHERE status = 'active' AND engagement = 'retainer'`,
+      ),
+    ]);
+
+    const loads = buyers.map((buyer) => ({ ...buyer, clients: 0, mrr: 0 }));
+    const byId = new Map(loads.map((load) => [load.id, load]));
+    const unassigned = { clients: 0, mrr: 0 };
+    for (const client of clients) {
+      const bucket = (client.media_buyer_id && byId.get(client.media_buyer_id)) || null;
+      if (bucket) {
+        bucket.clients += 1;
+        bucket.mrr += client.retainer_amount;
+      } else {
+        unassigned.clients += 1;
+        unassigned.mrr += client.retainer_amount;
+      }
+    }
+
+    const totalCapacity = loads.reduce((sum, load) => sum + load.capacity, 0);
+    return {
+      buyers: loads,
+      unassigned,
+      totalRetainers: clients.length,
+      totalCapacity,
+      headroom: totalCapacity - clients.length,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------- projection */
 
 export type ProjectedMonth = {
@@ -484,8 +550,8 @@ export type PnlMonth = {
  * dates — the month they earned in doesn't un-happen — but a churned client
  * with no end date recorded is skipped rather than counted forever.
  */
-export async function pnl(months = 12): Promise<PnlMonth[]> {
-  const keys = lastMonths(months);
+export async function pnl(months = 12, endKey?: string): Promise<PnlMonth[]> {
+  const keys = endKey ? lastMonths(months, endKey) : lastMonths(months);
   const currentKey = keys[keys.length - 1];
   const db = await getDb();
 

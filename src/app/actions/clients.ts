@@ -139,6 +139,12 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
       `UPDATE foundery.clients SET billing_email = $1, billing_cc = $2 WHERE id = $3`,
       [text(form, "billing_email"), text(form, "billing_cc"), savedId],
     );
+    // Same forgiveness for the buyer assignment (media_buyer_id column).
+    const buyerRaw = Number(form.get("media_buyer_id") ?? 0);
+    await db.query(`UPDATE foundery.clients SET media_buyer_id = $1 WHERE id = $2`, [
+      buyerRaw > 0 ? buyerRaw : null,
+      savedId,
+    ]);
   } catch {
     console.warn("foundery.clients.billing_email missing — run db/schema.sql");
   }

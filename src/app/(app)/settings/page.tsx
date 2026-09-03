@@ -7,7 +7,9 @@ import { Card, CardTitle, PageBody, PageHeader, TableWrap, Td, Th } from "@/comp
 import { BusinessForm, VisibilityForm } from "./settings-forms";
 import { TeamCard } from "./team-card";
 import { ResendCard } from "./resend-card";
+import { MediaBuyersCard } from "./media-buyers-card";
 import { listTeam } from "@/app/actions/team";
+import { listMediaBuyers } from "@/app/actions/media-buyers";
 import { getResendConfig } from "@/lib/resend";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -19,7 +21,7 @@ export default async function SettingsPage() {
   const currency = defaultCurrency();
   const db = await getDb();
 
-  const [storedSwitches, audit, businessName, cashBuffer, team, resendConfig] =
+  const [storedSwitches, audit, businessName, cashBuffer, team, resendConfig, buyers] =
     await Promise.all([
     readOperatorSwitches(),
     db.query<{
@@ -32,6 +34,7 @@ export default async function SettingsPage() {
     getSetting("cash_buffer", ""),
     listTeam(),
     getResendConfig(),
+    listMediaBuyers(),
   ]);
 
   const bootstrapFounder = (process.env.FOUNDERY_FOUNDER_EMAILS || "laksh@neuroidmedia.com")
@@ -50,6 +53,8 @@ export default async function SettingsPage() {
       <PageHeader title="Settings" subtitle="Visibility, the business, and who did what" />
       <PageBody>
         <TeamCard members={team} bootstrapFounder={bootstrapFounder} />
+
+        <MediaBuyersCard buyers={buyers} />
 
         <ResendCard connected={resendConfig !== null} founderEmail={bootstrapFounder} />
 

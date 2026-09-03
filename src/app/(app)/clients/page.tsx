@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
 import { policyFor } from "@/lib/policy";
 import { listClients, listGuidedOnboardings, publicWelcomeUrl } from "@/lib/queries";
+import { listMediaBuyers } from "@/app/actions/media-buyers";
 import { defaultCurrency, fmtMoney, symbolFor } from "@/lib/money";
 import { marginPct, monthlyRevenue } from "@/lib/economics";
 import { PageBody, PageHeader, PolicyNote } from "@/components/ui/primitives";
@@ -12,10 +13,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   const role = await requireRole();
-  const [policy, clients, guided] = await Promise.all([
+  const [policy, clients, guided, buyers] = await Promise.all([
     policyFor(role),
     listClients(role),
     listGuidedOnboardings(),
+    listMediaBuyers(),
   ]);
   const currency = defaultCurrency();
 
@@ -77,6 +79,7 @@ export default async function ClientsPage() {
           currencySymbol={symbolFor(currency)}
           money={money}
           onboardings={onboardings}
+          buyers={buyers}
         />
       </PageBody>
     </>

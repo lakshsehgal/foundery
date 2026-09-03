@@ -141,7 +141,7 @@ describe("cost history", () => {
 
 describe("P&L", () => {
   test("a month with no contracts and no costs is unknown, not zero", async () => {
-    const rows = await pnl(12);
+    const rows = await pnl(12, "2026-08");
     const early = rows.find((row) => row.month === "2025-09");
     assert.ok(early);
     assert.equal(early.hasData, false, "shown as a dash, so it can't read as a month we earned nothing");
@@ -154,7 +154,7 @@ describe("P&L", () => {
     );
 
     // July's contracted book: Big 400k + Small 100k, against the 200k salary.
-    const july = (await pnl(12)).find((row) => row.month === "2026-07")!;
+    const july = (await pnl(12, "2026-08")).find((row) => row.month === "2026-07")!;
     assert.equal(july.contracted, 500000);
     assert.equal(july.costs, 200000);
     assert.equal(july.profitBeforeTax, 300000);
@@ -167,7 +167,7 @@ describe("P&L", () => {
       `INSERT INTO foundery.pnl_months (month, other_income, one_off_costs, tax_rate, closed)
        VALUES ('2026-06', 0, 600000, 0.25, true)`,
     );
-    const june = (await pnl(12)).find((row) => row.month === "2026-06")!;
+    const june = (await pnl(12, "2026-08")).find((row) => row.month === "2026-06")!;
     assert.ok(june.profitBeforeTax < 0);
     assert.equal(june.tax, 0);
   });
@@ -178,14 +178,14 @@ describe("P&L", () => {
          start_date, end_date, billing_day, terms_days)
        VALUES ('Old Flame','old-flame','churned','retainer','[]',250000,'2026-01-01','2026-03-31',1,15)`,
     );
-    const rows = await pnl(12);
+    const rows = await pnl(12, "2026-08");
     assert.equal(rows.find((row) => row.month === "2026-03")!.contracted, 750000);
     assert.equal(rows.find((row) => row.month === "2026-04")!.contracted, 500000);
     await db.query(`DELETE FROM foundery.clients WHERE slug = 'old-flame'`);
   });
 
   test("totals ignore months that never happened", async () => {
-    const rows = await pnl(12);
+    const rows = await pnl(12, "2026-08");
     const totals = pnlTotals(rows);
     assert.equal(totals.months, rows.filter((row) => row.hasData).length);
     assert.ok(totals.months < 12);
@@ -274,5 +274,29 @@ describe("database TLS", () => {
     const bare = resolveSsl("postgres://u:p@host:6543/db");
     assert.equal(bare.cleanUrl, "postgres://u:p@host:6543/db");
     assert.deepEqual(bare.ssl, { rejectUnauthorized: false });
+  });
+});
+
+describe("media buyer load", () => {
+  test("clients per buyer, the unassigned bucket, and bench headroom", async () => {
+    const { mediaBuyerLoad } = await import("../src/lib/analytics");
+    const [asha] = await db.query<{ id: number }>(
+      `INSERT INTO foundery.media_buyers (name, capacity) VALUES ('Asha', 4) RETURNING id`,
+    );
+    await db.query(`INSERT INTO foundery.media_buyers (name, capacity) VALUES ('Vik', 3)`);
+    await db.query(`UPDATE foundery.clients SET media_buyer_id = $1 WHERE name = 'Big'`, [asha.id]);
+
+    const load = (await mediaBuyerLoad())!;
+    assert.deepEqual(
+      load.buyers.map((buyer) => [buyer.name, buyer.clients, buyer.mrr]),
+      [
+        ["Asha", 1, 400000],
+        ["Vik", 0, 0],
+      ],
+    );
+    assert.deepEqual(load.unassigned, { clients: 1, mrr: 100000 }, "Small has no buyer yet");
+    assert.equal(load.totalRetainers, 2);
+    assert.equal(load.totalCapacity, 7);
+    assert.equal(load.headroom, 5, "seven seats, two clients");
   });
 });

@@ -160,6 +160,21 @@ create table if not exists foundery.raised_invoices (
 alter table foundery.raised_invoices add column if not exists paid_at timestamptz;
 alter table foundery.raised_invoices add column if not exists paid_by text;
 
+-- The media-buying bench. Each buyer carries a capacity — how many retainer
+-- accounts they can comfortably run — so the founder dashboard can say
+-- whether the team is at, under, or over its limit.
+create table if not exists foundery.media_buyers (
+  id         bigint generated always as identity primary key,
+  name       text not null,
+  capacity   integer not null default 4,
+  active     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table foundery.media_buyers enable row level security;
+-- Which buyer runs each (retainer) account.
+alter table foundery.clients add column if not exists
+  media_buyer_id bigint references foundery.media_buyers(id) on delete set null;
+
 -- Who can sign in, managed from the dashboard. The environment allowlists
 -- remain the bootstrap fallback, so the very first login works with an empty
 -- table and the founder can never lock themself out.

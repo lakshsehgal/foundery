@@ -98,7 +98,7 @@ function CopyLinkButton({ url }: { url: string }) {
 }
 
 export function ClientsView({
-  clients, canEditValues, currencySymbol, money, onboardings,
+  clients, canEditValues, currencySymbol, money, onboardings, buyers,
 }: {
   clients: ClientView[];
   canEditValues: boolean;
@@ -107,6 +107,8 @@ export function ClientsView({
   money: Record<number, ClientMoney>;
   /** Latest guided onboarding per client per flow, if any. */
   onboardings: Record<number, Record<string, { status: string; url: string }>>;
+  /** The media-buying bench — id → name for the cards, full list for the editor. */
+  buyers: { id: number; name: string }[];
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("working");
@@ -233,6 +235,7 @@ export function ClientsView({
                 const clientTone = avatarTint(String(client.id));
                 const figures = money[client.id];
                 const onboarding = onboardings[client.id];
+                const buyerName = buyers.find((b) => b.id === client.media_buyer_id)?.name;
                 return (
                   <div
                     key={client.id}
@@ -283,6 +286,7 @@ export function ClientsView({
                       <p className="mt-0.5 truncate text-[11.5px] text-[var(--color-ink-3)]">
                         {ENGAGEMENT[client.engagement].short}
                         {client.owner ? ` · ${client.owner}` : ""}
+                        {client.engagement === "retainer" && buyerName ? ` · ${buyerName} on ads` : ""}
                         {client.engagement === "one_time"
                           ? client.end_date
                             ? ` · ships ${prettyDate(client.end_date)}`
@@ -392,6 +396,7 @@ export function ClientsView({
         client={editing}
         canEditValues={canEditValues}
         currencySymbol={currencySymbol}
+        buyers={buyers}
       />
     </>
   );

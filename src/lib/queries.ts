@@ -38,6 +38,8 @@ export type ClientView = {
   billing_email: string | null;
   /** Comma-separated CCs for those reminders. */
   billing_cc: string | null;
+  /** Which media buyer runs the account. Operational, visible to both roles. */
+  media_buyer_id: number | null;
 };
 
 type ClientRow = {
@@ -48,6 +50,7 @@ type ClientRow = {
   delivery_cost: number; health: string; zoho_name: string | null;
   billing_email?: string | null;
   billing_cc?: string | null;
+  media_buyer_id?: number | null;
 };
 
 /** jsonb arrives already parsed; anything else is treated as empty. */
@@ -79,6 +82,7 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     zoho_name: showValues ? (row.zoho_name ?? null) : null,
     billing_email: row.billing_email ?? null,
     billing_cc: row.billing_cc ?? null,
+    media_buyer_id: row.media_buyer_id ?? null,
   };
 }
 

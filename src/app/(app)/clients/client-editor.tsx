@@ -37,13 +37,15 @@ const ENGAGEMENT_OPTIONS: {
 ];
 
 export function ClientEditor({
-  open, onClose, client, canEditValues, currencySymbol,
+  open, onClose, client, canEditValues, currencySymbol, buyers,
 }: {
   open: boolean;
   onClose: () => void;
   client: ClientView | null;
   canEditValues: boolean;
   currencySymbol: string;
+  /** The media-buying bench, for the retainer assignment dropdown. */
+  buyers: { id: number; name: string }[];
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(saveClient, {});
   const [engagement, setEngagement] = useState<Engagement>(
@@ -162,7 +164,7 @@ export function ClientEditor({
           </div>
         </fieldset>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Status" htmlFor="status">
             <Select id="status" name="status" defaultValue={client?.status ?? "active"}>
               <option value="active">Active</option>
@@ -170,6 +172,28 @@ export function ClientEditor({
               <option value="churned">Churned</option>
             </Select>
           </Field>
+          {retainer ? (
+            <Field
+              label="Media buyer"
+              htmlFor="media_buyer_id"
+              hint={buyers.length === 0 ? "Add buyers on Settings first." : "Who runs the ads."}
+            >
+              <Select
+                id="media_buyer_id"
+                name="media_buyer_id"
+                defaultValue={String(client?.media_buyer_id ?? 0)}
+              >
+                <option value="0">Unassigned</option>
+                {buyers.map((buyer) => (
+                  <option key={buyer.id} value={buyer.id}>
+                    {buyer.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <input type="hidden" name="media_buyer_id" value={client?.media_buyer_id ?? 0} />
+          )}
           {canEditValues && (
             <Field label="Health" htmlFor="health" hint="Founder view only.">
               <Select id="health" name="health" defaultValue={client?.health ?? "green"}>

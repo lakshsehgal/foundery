@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { AlertTriangle, ShieldCheck, TriangleAlert } from "lucide-react";
 import { requireFounder } from "@/lib/auth";
-import { clientEconomics, efficiency, headline, projection, riskReport } from "@/lib/analytics";
+import { clientEconomics, efficiency, headline, mediaBuyerLoad, projection, riskReport } from "@/lib/analytics";
 import { costTotals } from "@/lib/queries";
 import { defaultCurrency, fmtCompact, fmtMoney, fmtPct } from "@/lib/money";
 import { CATEGORY_LABEL, CATEGORY_TONE, HEALTH } from "@/lib/taxonomy";
@@ -46,12 +46,13 @@ export default async function FounderPage() {
   await requireFounder();
 
   const currency = defaultCurrency();
-  const [head, economics, forecast, risk, totals] = await Promise.all([
+  const [head, economics, forecast, risk, totals, buyerLoad] = await Promise.all([
     headline(),
     clientEconomics(),
     projection(6),
     riskReport(),
     costTotals(),
+    mediaBuyerLoad(),
   ]);
   const burn = totals.reduce((sum, row) => sum + row.total, 0);
   const lever = efficiency(head, totals);
@@ -248,6 +249,50 @@ export default async function FounderPage() {
             />
           </div>
         </Card>
+
+        {/* --------------------------------------------- media buyer load */}
+        {buyerLoad && (buyerLoad.buyers.length > 0 || buyerLoad.unassigned.clients > 0) && (
+          <Card>
+            <CardTitle
+              title="Media buyer load"
+              hint="Active retainers per buyer against the capacity set on Settings. The verdict below is the hiring question, answered from the numbers."
+            />
+            {buyerLoad.buyers.map((buyer) => (
+              <BarRow
+                key={buyer.id}
+                label={`${buyer.name} · ${buyer.clients}/${buyer.capacity} client${buyer.capacity === 1 ? "" : "s"}`}
+                value={buyer.clients}
+                total={Math.max(buyer.capacity, buyer.clients)}
+                tone={
+                  buyer.clients > buyer.capacity
+                    ? "var(--color-critical)"
+                    : buyer.clients === buyer.capacity
+                      ? "var(--color-warning)"
+                      : "var(--color-series-1)"
+                }
+                right={fmtCompact(buyer.mrr, currency)}
+              />
+            ))}
+            {buyerLoad.unassigned.clients > 0 && (
+              <BarRow
+                label={`Unassigned · ${buyerLoad.unassigned.clients} client${buyerLoad.unassigned.clients === 1 ? "" : "s"}`}
+                value={buyerLoad.unassigned.clients}
+                total={Math.max(1, buyerLoad.totalRetainers)}
+                tone="var(--color-warning)"
+                right={fmtCompact(buyerLoad.unassigned.mrr, currency)}
+              />
+            )}
+            <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2.5 text-[12.5px] leading-relaxed text-[var(--color-ink-2)]">
+              {buyerLoad.totalCapacity === 0
+                ? `${buyerLoad.totalRetainers} retainer${buyerLoad.totalRetainers === 1 ? "" : "s"} and no bench recorded — add your media buyers on Settings and assign each account.`
+                : buyerLoad.headroom < 0
+                  ? `The bench is ${Math.abs(buyerLoad.headroom)} client${Math.abs(buyerLoad.headroom) === 1 ? "" : "s"} over capacity (${buyerLoad.totalRetainers} retainers on ${buyerLoad.totalCapacity} seats). Time to hire — or raise a capacity if someone genuinely carries more.`
+                  : buyerLoad.headroom <= 1
+                    ? `At capacity: ${buyerLoad.totalRetainers} retainers on ${buyerLoad.totalCapacity} seats. The next signing needs a new buyer lined up.`
+                    : `Headroom for ${buyerLoad.headroom} more client${buyerLoad.headroom === 1 ? "" : "s"} (${buyerLoad.totalRetainers} retainers on ${buyerLoad.totalCapacity} seats) — sell before you hire.`}
+            </p>
+          </Card>
+        )}
 
         {/* --------------------------------------------------- revenue mix */}
         <Card>
