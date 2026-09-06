@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useSyncExternalStore } from "react";
 import {
-  BadgeIndianRupee, Banknote, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, LineChart,
-  Lock, LogOut, Moon, Receipt, Settings, Sun, Users, Wallet,
+  BadgeIndianRupee, Banknote, ChevronsLeft, ChevronsRight, Clapperboard, FileText, LayoutGrid,
+  LineChart, Lock, LogOut, Moon, Receipt, Settings, Sun, Users, Wallet,
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { Logo } from "@/components/ui/primitives";
@@ -24,6 +24,7 @@ const ITEMS: Item[] = [
   { href: "/costs", label: "Costs", icon: Wallet },
   { href: "/invoices", label: "Invoices", icon: Receipt },
   { href: "/onboarding", label: "Onboarding", icon: FileText },
+  { href: "/content", label: "Content", icon: Clapperboard },
   { href: "/founder", label: "Founder dashboard", icon: LineChart, founderOnly: true },
   { href: "/cashflow", label: "Cashflow", icon: Banknote, founderOnly: true },
   { href: "/pnl", label: "Profit & P&L", icon: BadgeIndianRupee, founderOnly: true },

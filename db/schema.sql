@@ -198,6 +198,28 @@ create table if not exists foundery.login_codes (
 );
 create index if not exists idx_login_codes_email on foundery.login_codes(email);
 
+-- Personal-brand content pipeline: every piece moves concept → scripting →
+-- shoot_due → shot → editing → ready → posted. The script and the shoot
+-- brief (dimension + framing notes) live on the piece so scripting and the
+-- shoot day read from one place.
+create table if not exists foundery.content_pieces (
+  id          bigint generated always as identity primary key,
+  title       text not null,
+  status      text not null default 'concept',        -- concept | scripting | shoot_due | shot | editing | ready | posted
+  platform    text not null default 'instagram_reel', -- instagram_reel | youtube_short | youtube_long | linkedin | other
+  dimension   text not null default '9x16',           -- 9x16 | 4x5 | 1x1 | 16x9
+  hook        text,                                   -- the opening line that earns the next 3 seconds
+  script      text,                                   -- the full script, printable from /content/[id]/script
+  shoot_notes text,                                   -- the brief: location, wardrobe, props, framing
+  shoot_date  date,
+  post_date   date,
+  editor      text,                                   -- who's cutting it
+  notes       text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists idx_content_status on foundery.content_pieces(status);
+
 create table if not exists foundery.settings (
   key   text primary key,
   value text not null
@@ -227,3 +249,4 @@ alter table foundery.team_members           enable row level security;
 alter table foundery.login_codes            enable row level security;
 alter table foundery.raised_invoices        enable row level security;
 alter table foundery.audit_log              enable row level security;
+alter table foundery.content_pieces         enable row level security;
