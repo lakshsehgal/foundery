@@ -91,6 +91,10 @@ alter table foundery.clients  add column if not exists zoho_name text;
 -- comma-separated, for the other people on the brand's side).
 alter table foundery.clients  add column if not exists billing_email text;
 alter table foundery.clients  add column if not exists billing_cc text;
+-- The mandate exactly as it was closed, in the founder's own words
+-- (e.g. '45k + 2% of adspend'). Free text on purpose: deals don't all fit
+-- a retainer number. Founder-gated in the app like the other values.
+alter table foundery.clients  add column if not exists final_deal text;
 create index if not exists idx_invoices_due    on foundery.invoices(due_date);
 
 create table if not exists foundery.onboarding_forms (
