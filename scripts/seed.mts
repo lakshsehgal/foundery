@@ -49,6 +49,7 @@ type SeedClient = {
   name: string; engagement: string; vip: boolean; status: string; services: string[];
   retainer?: number; oneTime?: number; delivery: number; health: string; owner: string;
   start: string; end?: string; billing: number; terms: number; notes: string;
+  finalDeal?: string;
 };
 
 const clients: SeedClient[] = [
@@ -58,6 +59,7 @@ const clients: SeedClient[] = [
     retainer: 185000, delivery: 82000, health: "green", owner: "Laksh",
     start: monthsAgo(9) + "-01", billing: 1, terms: 15,
     notes: "Kids' apparel D2C. Scaling Meta, TikTok next quarter.",
+    finalDeal: "1.85L/mo + 2% of adspend above 25L",
   },
   {
     name: "UniSeoul", engagement: "retainer", vip: true, status: "active",
@@ -65,6 +67,7 @@ const clients: SeedClient[] = [
     retainer: 225000, delivery: 96000, health: "green", owner: "Laksh",
     start: monthsAgo(6) + "-15", billing: 5, terms: 15,
     notes: "K-beauty importer. Biggest account, biggest concentration risk.",
+    finalDeal: "2.25L/mo flat — creatives and UGC bundled in",
   },
   {
     name: "Wellness Shop", engagement: "retainer", vip: false, status: "active",
@@ -86,6 +89,7 @@ const clients: SeedClient[] = [
     oneTime: 340000, delivery: 62000, health: "green", owner: "Laksh",
     start: monthsAgo(1) + "-01", end: addDays(today, 45), billing: 1, terms: 15,
     notes: "Site rebuild plus a creative bank. Billed in three phases.",
+    finalDeal: "3.4L fixed — 40/40/20 across three phases",
   },
   {
     name: "Bluewater Fit", engagement: "retainer", vip: false, status: "paused",
@@ -109,10 +113,10 @@ for (const client of clients) {
     ...named(
       `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services,
          retainer_amount, one_time_value, delivery_cost, start_date, end_date,
-         billing_day, terms_days, owner, health, notes)
+         billing_day, terms_days, owner, health, notes, final_deal)
        VALUES (@name, @slug, @status, @engagement, @vip, @services::jsonb,
          @retainer, @oneTime, @delivery, @start, @end,
-         @billing, @terms, @owner, @health, @notes)
+         @billing, @terms, @owner, @health, @notes, @finalDeal)
        RETURNING id`,
       {
         ...client,
@@ -121,6 +125,7 @@ for (const client of clients) {
         retainer: client.retainer ?? 0,
         oneTime: client.oneTime ?? 0,
         end: client.end ?? null,
+        finalDeal: client.finalDeal ?? null,
       },
     ),
   );

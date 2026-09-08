@@ -37,6 +37,9 @@ export type ClientView = {
   delivery_cost: number | null;
   health: Health | null;
   zoho_name: string | null;
+  /** The mandate as closed, in words ('45k + 2% of adspend'). Commercial,
+      so it follows the client-values switch like the numbers above. */
+  final_deal: string | null;
   /** Where payment reminders go. Operational, so visible to both roles. */
   billing_email: string | null;
   /** Comma-separated CCs for those reminders. */
@@ -54,6 +57,7 @@ type ClientRow = {
   billing_email?: string | null;
   billing_cc?: string | null;
   media_buyer_id?: number | null;
+  final_deal?: string | null;
 };
 
 /** jsonb arrives already parsed; anything else is treated as empty. */
@@ -83,6 +87,7 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     delivery_cost: showValues ? row.delivery_cost : null,
     health: showValues ? (row.health as Health) : null,
     zoho_name: showValues ? (row.zoho_name ?? null) : null,
+    final_deal: showValues ? (row.final_deal ?? null) : null,
     billing_email: row.billing_email ?? null,
     billing_cc: row.billing_cc ?? null,
     media_buyer_id: row.media_buyer_id ?? null,

@@ -249,6 +249,19 @@ export function ClientEditor({
 
         {canEditValues && (
           <div className="grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] p-3.5 sm:grid-cols-2">
+            <Field
+              label="Final deal"
+              htmlFor="final_deal"
+              hint="The mandate exactly as it closed — in your words, so nobody re-derives it from the numbers."
+              className="sm:col-span-2"
+            >
+              <TextInput
+                id="final_deal"
+                name="final_deal"
+                defaultValue={client?.final_deal ?? ""}
+                placeholder="45k + 2% of adspend"
+              />
+            </Field>
             {retainer ? (
               <>
                 <Field
