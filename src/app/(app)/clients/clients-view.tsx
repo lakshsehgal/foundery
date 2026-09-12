@@ -1,18 +1,21 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { Check, Copy, Crown, Pencil, Plus, Rocket, Search, Users } from "lucide-react";
+import {
+  Check, Copy, Crown, LayoutGrid, Pencil, Plus, Rocket, Search, TableProperties, Users,
+} from "lucide-react";
 import { startOnboarding } from "@/app/actions/onboarding";
 import type { ActionState } from "@/app/actions/clients";
 import { Button, Select, TextInput } from "@/components/ui/form";
-import { avatarTint, Chip, EmptyState, Redacted } from "@/components/ui/primitives";
+import { avatarTint, Chip, EmptyState, Redacted, TableWrap, Td, Th } from "@/components/ui/primitives";
 import {
   CLIENT_STATUS, ENGAGEMENT, HEALTH, ONBOARDING_FLOWS, ONBOARDING_STATUS,
   type ClientStatus, type OnboardingFlow, type OnboardingStatus,
 } from "@/lib/taxonomy";
 import type { ClientView } from "@/lib/queries";
 import { prettyDate } from "@/lib/dates";
+import { fmtMoney, type CurrencyCode } from "@/lib/money";
 import { ClientEditor } from "./client-editor";
 
 export type ClientMoney = {
@@ -20,7 +23,35 @@ export type ClientMoney = {
   /** Set only for one-off projects: the whole contract, not the monthly slice. */
   total: string | null;
   margin: number | null;
+  /** The raw numbers behind the strings, so the list view can add them up. */
+  monthlyValue: number;
+  totalValue: number | null;
 };
+
+/**
+ * Board or list is a taste, not data, so it lives in localStorage like the
+ * sidebar's rail and theme — read with useSyncExternalStore so the server
+ * renders the board default and the client corrects itself in one commit.
+ */
+const PREFS_EVENT = "foundery:prefs";
+const VIEW_KEY = "foundery-clients-view";
+
+function subscribePrefs(onChange: () => void) {
+  window.addEventListener(PREFS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(PREFS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function readListPref(): boolean {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list";
+  } catch {
+    return false;
+  }
+}
 
 const GROUPS: { status: ClientStatus; hint: string }[] = [
   { status: "active", hint: "Being delivered right now" },
@@ -97,11 +128,202 @@ function CopyLinkButton({ url }: { url: string }) {
   );
 }
 
+function FootTd({
+  children, align = "left", colSpan,
+}: {
+  children?: React.ReactNode; align?: "left" | "right"; colSpan?: number;
+}) {
+  return (
+    <td
+      colSpan={colSpan}
+      className={`border-t border-[var(--color-line-strong)] bg-[var(--color-surface-2)] px-3 py-2.5 text-[12.5px] font-semibold ${
+        align === "right" ? "tabular text-right" : "text-left"
+      }`}
+    >
+      {children}
+    </td>
+  );
+}
+
+/**
+ * The same book of business as the board, flattened into a spreadsheet: one
+ * row per client, and the totals a spreadsheet would have at the bottom — the
+ * retainer book as a monthly figure, projects as contract value.
+ */
+function ListTable({
+  rows, money, buyers, currency, canEditValues, onEdit,
+}: {
+  rows: ClientView[];
+  money: Record<number, ClientMoney>;
+  buyers: { id: number; name: string }[];
+  currency: CurrencyCode;
+  canEditValues: boolean;
+  onEdit: (client: ClientView) => void;
+}) {
+  const retainers = rows.filter((client) => client.engagement === "retainer");
+  const projects = rows.filter((client) => client.engagement === "one_time");
+  const sum = (list: ClientView[], pick: (figures: ClientMoney) => number) =>
+    list.reduce((acc, client) => acc + (money[client.id] ? pick(money[client.id]) : 0), 0);
+  const retainerMonthly = sum(retainers, (figures) => figures.monthlyValue);
+  const projectMonthly = sum(projects, (figures) => figures.monthlyValue);
+  const projectTotal = sum(projects, (figures) => figures.totalValue ?? 0);
+
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-surface)]">
+      <TableWrap>
+        <thead>
+          <tr>
+            <Th>Client</Th>
+            <Th>Deal</Th>
+            <Th>Status</Th>
+            <Th>Media buyer</Th>
+            <Th>Billing</Th>
+            <Th align="right">Monthly</Th>
+            <Th align="right">Project total</Th>
+            <Th align="right">Margin</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((client) => {
+            const figures = money[client.id];
+            const buyerName =
+              client.engagement === "retainer"
+                ? buyers.find((buyer) => buyer.id === client.media_buyer_id)?.name
+                : undefined;
+            return (
+              <tr
+                key={client.id}
+                tabIndex={0}
+                onClick={() => onEdit(client)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onEdit(client);
+                  }
+                }}
+                className="cursor-pointer transition-colors hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)]"
+              >
+                <Td>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: avatarTint(String(client.id)) }}
+                    />
+                    <span className="min-w-0 truncate font-semibold">{client.name}</span>
+                    {client.vip && (
+                      <Crown size={11} aria-label="VIP account" className="shrink-0 text-[var(--color-accent)]" />
+                    )}
+                    {client.health && (
+                      <span
+                        aria-label={HEALTH[client.health].label}
+                        title={`${HEALTH[client.health].label} — ${HEALTH[client.health].hint}`}
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: HEALTH[client.health].tone }}
+                      />
+                    )}
+                  </span>
+                  {client.owner && (
+                    <span className="mt-0.5 block truncate text-[11px] text-[var(--color-ink-3)]">
+                      {client.owner}
+                    </span>
+                  )}
+                </Td>
+                <Td className="whitespace-nowrap text-[12.5px] text-[var(--color-ink-2)]">
+                  {ENGAGEMENT[client.engagement].short}
+                </Td>
+                <Td>
+                  <span
+                    className="whitespace-nowrap text-[12.5px] font-semibold"
+                    style={{ color: CLIENT_STATUS[client.status].tone }}
+                  >
+                    {CLIENT_STATUS[client.status].label}
+                  </span>
+                </Td>
+                <Td className="whitespace-nowrap text-[12.5px] text-[var(--color-ink-2)]">
+                  {client.engagement === "retainer" ? buyerName ?? "Unassigned" : "—"}
+                </Td>
+                <Td className="whitespace-nowrap text-[12.5px] text-[var(--color-ink-2)]">
+                  {client.engagement === "one_time"
+                    ? client.end_date
+                      ? `Ships ${prettyDate(client.end_date)}`
+                      : "No ship date"
+                    : `Day ${client.billing_day} · net ${client.terms_days}`}
+                </Td>
+                <Td align="right" className="tabular whitespace-nowrap font-semibold">
+                  {figures ? figures.monthly : <Redacted />}
+                </Td>
+                <Td align="right" className="tabular whitespace-nowrap text-[var(--color-ink-2)]">
+                  {figures?.total ?? "—"}
+                </Td>
+                <Td align="right" className="tabular whitespace-nowrap font-semibold">
+                  {figures && figures.margin !== null ? (
+                    <span style={{ color: marginTone(figures.margin) }}>
+                      {figures.margin.toFixed(0)}%
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </Td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <FootTd colSpan={5}>
+              Retainers · {retainers.length}
+              <span className="ml-1.5 font-normal text-[var(--color-ink-3)]">recurring book</span>
+            </FootTd>
+            <FootTd align="right">
+              {canEditValues ? `${fmtMoney(retainerMonthly, currency)} / mo` : <Redacted />}
+            </FootTd>
+            <FootTd align="right">—</FootTd>
+            <FootTd align="right" />
+          </tr>
+          {projects.length > 0 && (
+            <tr>
+              <FootTd colSpan={5}>
+                One-off projects · {projects.length}
+                <span className="ml-1.5 font-normal text-[var(--color-ink-3)]">
+                  spread over their months
+                </span>
+              </FootTd>
+              <FootTd align="right">
+                {canEditValues ? `${fmtMoney(projectMonthly, currency)} / mo` : <Redacted />}
+              </FootTd>
+              <FootTd align="right">
+                {canEditValues ? fmtMoney(projectTotal, currency) : <Redacted />}
+              </FootTd>
+              <FootTd align="right" />
+            </tr>
+          )}
+          {retainers.length > 0 && projects.length > 0 && (
+            <tr>
+              <FootTd colSpan={5}>Everything · {rows.length} clients</FootTd>
+              <FootTd align="right">
+                {canEditValues ? (
+                  `${fmtMoney(retainerMonthly + projectMonthly, currency)} / mo`
+                ) : (
+                  <Redacted />
+                )}
+              </FootTd>
+              <FootTd align="right">—</FootTd>
+              <FootTd align="right" />
+            </tr>
+          )}
+        </tfoot>
+      </TableWrap>
+    </div>
+  );
+}
+
 export function ClientsView({
-  clients, canEditValues, currencySymbol, money, onboardings, buyers,
+  clients, canEditValues, currency, currencySymbol, money, onboardings, buyers,
 }: {
   clients: ClientView[];
   canEditValues: boolean;
+  currency: CurrencyCode;
   currencySymbol: string;
   /** Worked out and formatted on the server. Absent = not cleared to see it. */
   money: Record<number, ClientMoney>;
@@ -113,6 +335,15 @@ export function ClientsView({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("working");
   const [dealFilter, setDealFilter] = useState("all");
+  const listView = useSyncExternalStore(subscribePrefs, readListPref, () => false);
+  const setListView = useCallback((list: boolean) => {
+    try {
+      localStorage.setItem(VIEW_KEY, list ? "list" : "board");
+    } catch {
+      // Storage refused — nothing to do; the view stays where it was.
+    }
+    window.dispatchEvent(new Event(PREFS_EVENT));
+  }, []);
   const [editing, setEditing] = useState<ClientView | null>(null);
   const [open, setOpen] = useState(false);
   // Bumped on every open: folded into the editor's key so each open is a
@@ -188,6 +419,40 @@ export function ClientsView({
             <option value="one_time">One-off projects</option>
           </Select>
         </div>
+        <div
+          role="group"
+          aria-label="View as board or list"
+          className="flex shrink-0 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-line-strong)]"
+        >
+          <button
+            type="button"
+            aria-pressed={!listView}
+            title="Board — cards grouped by status"
+            onClick={() => setListView(false)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-2 text-[12px] font-semibold transition-colors ${
+              listView
+                ? "text-[var(--color-ink-3)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+                : "bg-[var(--color-surface-3)] text-[var(--color-ink)]"
+            }`}
+          >
+            <LayoutGrid size={13} aria-hidden />
+            Board
+          </button>
+          <button
+            type="button"
+            aria-pressed={listView}
+            title="List — one row per client, totals at the bottom"
+            onClick={() => setListView(true)}
+            className={`inline-flex items-center gap-1.5 border-l border-[var(--color-line-strong)] px-2.5 py-2 text-[12px] font-semibold transition-colors ${
+              listView
+                ? "bg-[var(--color-surface-3)] text-[var(--color-ink)]"
+                : "text-[var(--color-ink-3)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+            }`}
+          >
+            <TableProperties size={13} aria-hidden />
+            List
+          </button>
+        </div>
         <Button variant="primary" onClick={() => edit(null)} className="shrink-0">
           <Plus size={14} />
           Add client
@@ -214,6 +479,15 @@ export function ClientsView({
             }
           />
         </div>
+      ) : listView ? (
+        <ListTable
+          rows={groups.flatMap((group) => group.clients)}
+          money={money}
+          buyers={buyers}
+          currency={currency}
+          canEditValues={canEditValues}
+          onEdit={edit}
+        />
       ) : (
         groups.map((group) => (
           <section key={group.status}>

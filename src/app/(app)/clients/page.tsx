@@ -37,7 +37,16 @@ export default async function ClientsPage() {
   // Money is formatted and margins are worked out here, on the server: the
   // currency rules stay in one place, and a redacted figure is never handed to
   // the browser just so the browser can decide not to draw it.
-  const money: Record<number, { monthly: string; total: string | null; margin: number | null }> = {};
+  const money: Record<
+    number,
+    {
+      monthly: string;
+      total: string | null;
+      margin: number | null;
+      monthlyValue: number;
+      totalValue: number | null;
+    }
+  > = {};
   for (const client of clients) {
     if (client.retainer_amount === null || client.one_time_value === null) continue;
     const monthly = monthlyRevenue({
@@ -54,6 +63,10 @@ export default async function ClientsPage() {
       // silently standing in for the other.
       total: client.engagement === "one_time" ? fmtMoney(client.one_time_value, currency) : null,
       margin: marginPct(monthly, client.delivery_cost ?? 0),
+      // The raw figures ride along so the list view can total whatever subset
+      // the filters leave visible — formatted strings don't add up.
+      monthlyValue: monthly,
+      totalValue: client.engagement === "one_time" ? client.one_time_value : null,
     };
   }
 
@@ -76,6 +89,7 @@ export default async function ClientsPage() {
         <ClientsView
           clients={clients}
           canEditValues={policy.clientValues}
+          currency={currency}
           currencySymbol={symbolFor(currency)}
           money={money}
           onboardings={onboardings}
