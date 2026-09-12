@@ -617,6 +617,23 @@ export function ClientsView({
                         )}
                       </div>
 
+                      {/* The mandate as closed — null for roles not cleared
+                          to see values, so this renders for the same eyes
+                          as the numbers above it. */}
+                      {client.final_deal && (
+                        <p
+                          className="mt-2 flex min-w-0 items-baseline gap-1.5"
+                          title={`Final deal — ${client.final_deal}`}
+                        >
+                          <span className="shrink-0 text-[10.5px] font-medium uppercase tracking-[0.08em] text-[var(--color-ink-3)]">
+                            Deal
+                          </span>
+                          <span className="min-w-0 truncate text-[11.5px] font-medium">
+                            {client.final_deal}
+                          </span>
+                        </p>
+                      )}
+
                       {/* Onboarding strip: one row per flow — start, track, copy. */}
                       <div
                         className="mt-3 -mx-1 space-y-1 border-t border-[var(--color-line)] pt-2.5"

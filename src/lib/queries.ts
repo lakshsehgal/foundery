@@ -5,10 +5,13 @@ import { policyFor } from "./policy";
 import { monthlyEquivalent } from "./money";
 import { billingDateFor, daysUntil, lastMonths, monthLabel, todayISO } from "./dates";
 import type {
-  ClientStatus, CostCategory, Engagement, Health, OnboardingField,
-  OnboardingFlow,
+  ClientStatus, ContentDimension, ContentPlatform, ContentStatus, CostCategory,
+  Engagement, Health, OnboardingField, OnboardingFlow,
 } from "./taxonomy";
-import { CATEGORY_LABEL, COST_CATEGORIES } from "./taxonomy";
+import {
+  CATEGORY_LABEL, CONTENT_PIPELINE, COST_CATEGORIES, isContentDimension,
+  isContentPlatform, isContentStatus,
+} from "./taxonomy";
 
 /* --------------------------------------------------------------- clients */
 
@@ -34,6 +37,9 @@ export type ClientView = {
   delivery_cost: number | null;
   health: Health | null;
   zoho_name: string | null;
+  /** The mandate as closed, in words ('45k + 2% of adspend'). Commercial,
+      so it follows the client-values switch like the numbers above. */
+  final_deal: string | null;
   /** Where payment reminders go. Operational, so visible to both roles. */
   billing_email: string | null;
   /** Comma-separated CCs for those reminders. */
@@ -51,6 +57,7 @@ type ClientRow = {
   billing_email?: string | null;
   billing_cc?: string | null;
   media_buyer_id?: number | null;
+  final_deal?: string | null;
 };
 
 /** jsonb arrives already parsed; anything else is treated as empty. */
@@ -80,6 +87,7 @@ function toClientView(row: ClientRow, showValues: boolean): ClientView {
     delivery_cost: showValues ? row.delivery_cost : null,
     health: showValues ? (row.health as Health) : null,
     zoho_name: showValues ? (row.zoho_name ?? null) : null,
+    final_deal: showValues ? (row.final_deal ?? null) : null,
     billing_email: row.billing_email ?? null,
     billing_cc: row.billing_cc ?? null,
     media_buyer_id: row.media_buyer_id ?? null,
@@ -652,6 +660,79 @@ export async function getGuidedByToken(token: string): Promise<GuidedOnboarding 
     } catch {
       return null;
     }
+  }
+}
+
+/* -------------------------------------------------------- personal brand */
+
+export type ContentPieceView = {
+  id: number;
+  title: string;
+  status: ContentStatus;
+  platform: ContentPlatform;
+  dimension: ContentDimension;
+  hook: string | null;
+  script: string | null;
+  shoot_notes: string | null;
+  shoot_date: string | null;
+  post_date: string | null;
+  editor: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ContentRow = {
+  id: number; title: string; status: string; platform: string; dimension: string;
+  hook: string | null; script: string | null; shoot_notes: string | null;
+  shoot_date: string | null; post_date: string | null; editor: string | null;
+  notes: string | null; created_at: string; updated_at: string;
+};
+
+/** Unknown values (a hand-edited row, an older vocabulary) fall back sanely. */
+function toContentPiece(row: ContentRow): ContentPieceView {
+  return {
+    ...row,
+    status: isContentStatus(row.status) ? row.status : "concept",
+    platform: isContentPlatform(row.platform) ? row.platform : "other",
+    dimension: isContentDimension(row.dimension) ? row.dimension : "9x16",
+  };
+}
+
+/**
+ * The whole pipeline, in board order: production stage first, then the
+ * nearest shoot date inside a stage, newest ideas first where no date is
+ * set. Content planning is operational, so both roles read it in full.
+ */
+export async function listContentPieces(): Promise<ContentPieceView[]> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<ContentRow>(
+      `SELECT * FROM foundery.content_pieces
+       ORDER BY shoot_date ASC NULLS LAST, created_at DESC`,
+    );
+    const order = CONTENT_PIPELINE.map((stage) => stage.key as string);
+    return rows
+      .map(toContentPiece)
+      .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+  } catch {
+    // The table ships in db/schema.sql; until it's applied the board is
+    // simply empty rather than the page going down.
+    console.warn("foundery.content_pieces missing — re-run db/schema.sql to enable content planning");
+    return [];
+  }
+}
+
+export async function getContentPiece(id: number): Promise<ContentPieceView | null> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<ContentRow>(
+      `SELECT * FROM foundery.content_pieces WHERE id = $1`,
+      [id],
+    );
+    return rows[0] ? toContentPiece(rows[0]) : null;
+  } catch {
+    return null;
   }
 }
 

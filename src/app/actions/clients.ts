@@ -149,6 +149,20 @@ export async function saveClient(_prev: ActionState, form: FormData): Promise<Ac
     console.warn("foundery.clients.billing_email missing — run db/schema.sql");
   }
 
+  // The closed mandate is commercial, so it only ever comes off a founder's
+  // form — an operator's post can't touch it, forged input or not. Same
+  // forgiveness as above for a database the schema hasn't reached yet.
+  if (role === "founder") {
+    try {
+      await db.query(`UPDATE foundery.clients SET final_deal = $1 WHERE id = $2`, [
+        text(form, "final_deal"),
+        savedId,
+      ]);
+    } catch {
+      console.warn("foundery.clients.final_deal missing — run db/schema.sql");
+    }
+  }
+
   revalidatePath("/clients");
   revalidatePath("/");
   revalidatePath("/founder");

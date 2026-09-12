@@ -406,3 +406,176 @@ export const ONBOARDING_STATUS: Record<OnboardingStatus, { label: string; tone: 
   details_done: { label: "Details in — accesses pending", tone: "var(--color-warning)" },
   completed: { label: "Onboarded", tone: "var(--color-good)" },
 };
+
+/* ------------------------------------------------------- personal brand */
+
+/**
+ * The content pipeline, in production order. Every piece is somewhere on
+ * this line; the board groups by it and the advance button walks it.
+ */
+export type ContentStatus =
+  | "concept"
+  | "scripting"
+  | "shoot_due"
+  | "shot"
+  | "editing"
+  | "ready"
+  | "posted";
+
+export const CONTENT_PIPELINE: {
+  key: ContentStatus;
+  label: string;
+  tone: string;
+  hint: string;
+  /** The verb on the card that moves a piece here from the stage before. */
+  advance: string;
+}[] = [
+  {
+    key: "concept",
+    label: "Concept",
+    tone: "var(--color-series-1)",
+    hint: "An idea worth making — no script yet",
+    advance: "Start scripting",
+  },
+  {
+    key: "scripting",
+    label: "Scripting",
+    tone: "var(--color-series-5)",
+    hint: "Being written — hook first, then the rest",
+    advance: "Script locked",
+  },
+  {
+    key: "shoot_due",
+    label: "Shoot due",
+    tone: "var(--color-warning)",
+    hint: "Script locked — waiting on camera time",
+    advance: "Mark as shot",
+  },
+  {
+    key: "shot",
+    label: "Shot",
+    tone: "var(--color-series-2)",
+    hint: "Footage in hand, not yet with the editor",
+    advance: "Send to edit",
+  },
+  {
+    key: "editing",
+    label: "In edit",
+    tone: "var(--color-series-3)",
+    hint: "With the editor — cut, captions, sound",
+    advance: "Edit approved",
+  },
+  {
+    key: "ready",
+    label: "Ready to post",
+    tone: "var(--color-series-4)",
+    hint: "Approved and exported — pick the day",
+    advance: "Mark as posted",
+  },
+  {
+    key: "posted",
+    label: "Posted",
+    tone: "var(--color-good)",
+    hint: "Live — kept for the record",
+    advance: "",
+  },
+];
+
+export const CONTENT_STATUS: Record<
+  ContentStatus,
+  { label: string; tone: string; hint: string; advance: string }
+> = Object.fromEntries(
+  CONTENT_PIPELINE.map(({ key, ...rest }) => [key, rest]),
+) as Record<ContentStatus, { label: string; tone: string; hint: string; advance: string }>;
+
+export function isContentStatus(value: string): value is ContentStatus {
+  return CONTENT_PIPELINE.some((stage) => stage.key === value);
+}
+
+/** The stage after this one, or null at the end of the line. */
+export function nextContentStatus(status: ContentStatus): ContentStatus | null {
+  const index = CONTENT_PIPELINE.findIndex((stage) => stage.key === status);
+  return index >= 0 && index < CONTENT_PIPELINE.length - 1
+    ? CONTENT_PIPELINE[index + 1].key
+    : null;
+}
+
+/**
+ * The frame a piece is shot in. Written like a brief — the ratio, what it's
+ * for, and the export size — so the shoot day never guesses the crop.
+ */
+export type ContentDimension = "9x16" | "4x5" | "1x1" | "16x9";
+
+export const CONTENT_DIMENSIONS: {
+  key: ContentDimension;
+  label: string;
+  /** width / height, for the little preview frame in the picker. */
+  ratio: number;
+  spec: string;
+  hint: string;
+}[] = [
+  {
+    key: "9x16",
+    label: "9:16 · Vertical",
+    ratio: 9 / 16,
+    spec: "1080 × 1920",
+    hint: "Reels, Shorts, TikTok. Full-bleed vertical — keep the subject centre-frame.",
+  },
+  {
+    key: "4x5",
+    label: "4:5 · Portrait",
+    ratio: 4 / 5,
+    spec: "1080 × 1350",
+    hint: "Instagram feed. Slightly taller than square — safe crop from 9:16.",
+  },
+  {
+    key: "1x1",
+    label: "1:1 · Square",
+    ratio: 1,
+    spec: "1080 × 1080",
+    hint: "Feed and carousel stills. Leave headroom for the crop.",
+  },
+  {
+    key: "16x9",
+    label: "16:9 · Landscape",
+    ratio: 16 / 9,
+    spec: "1920 × 1080",
+    hint: "YouTube long-form and talking-head podcast clips.",
+  },
+];
+
+export const CONTENT_DIMENSION: Record<
+  ContentDimension,
+  { label: string; ratio: number; spec: string; hint: string }
+> = Object.fromEntries(
+  CONTENT_DIMENSIONS.map(({ key, ...rest }) => [key, rest]),
+) as Record<ContentDimension, { label: string; ratio: number; spec: string; hint: string }>;
+
+export function isContentDimension(value: string): value is ContentDimension {
+  return CONTENT_DIMENSIONS.some((dimension) => dimension.key === value);
+}
+
+export type ContentPlatform =
+  | "instagram_reel"
+  | "youtube_short"
+  | "youtube_long"
+  | "linkedin"
+  | "other";
+
+export const CONTENT_PLATFORMS: { key: ContentPlatform; label: string; short: string }[] = [
+  { key: "instagram_reel", label: "Instagram Reel", short: "IG Reel" },
+  { key: "youtube_short", label: "YouTube Short", short: "YT Short" },
+  { key: "youtube_long", label: "YouTube long-form", short: "YT Long" },
+  { key: "linkedin", label: "LinkedIn", short: "LinkedIn" },
+  { key: "other", label: "Somewhere else", short: "Other" },
+];
+
+export const CONTENT_PLATFORM: Record<ContentPlatform, { label: string; short: string }> =
+  Object.fromEntries(CONTENT_PLATFORMS.map(({ key, ...rest }) => [key, rest])) as Record<
+    ContentPlatform,
+    { label: string; short: string }
+  >;
+
+export function isContentPlatform(value: string): value is ContentPlatform {
+  return CONTENT_PLATFORMS.some((platform) => platform.key === value);
+}

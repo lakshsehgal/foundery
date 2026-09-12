@@ -30,7 +30,7 @@ if (force) {
   await db.exec(`
     TRUNCATE foundery.onboarding_submissions, foundery.onboarding_forms,
              foundery.invoices, foundery.costs, foundery.clients,
-             foundery.pnl_months, foundery.audit_log
+             foundery.pnl_months, foundery.audit_log, foundery.content_pieces
     RESTART IDENTITY CASCADE;
   `);
 }
@@ -49,6 +49,7 @@ type SeedClient = {
   name: string; engagement: string; vip: boolean; status: string; services: string[];
   retainer?: number; oneTime?: number; delivery: number; health: string; owner: string;
   start: string; end?: string; billing: number; terms: number; notes: string;
+  finalDeal?: string;
 };
 
 const clients: SeedClient[] = [
@@ -58,6 +59,7 @@ const clients: SeedClient[] = [
     retainer: 185000, delivery: 82000, health: "green", owner: "Laksh",
     start: monthsAgo(9) + "-01", billing: 1, terms: 15,
     notes: "Kids' apparel D2C. Scaling Meta, TikTok next quarter.",
+    finalDeal: "1.85L/mo + 2% of adspend above 25L",
   },
   {
     name: "UniSeoul", engagement: "retainer", vip: true, status: "active",
@@ -65,6 +67,7 @@ const clients: SeedClient[] = [
     retainer: 225000, delivery: 96000, health: "green", owner: "Laksh",
     start: monthsAgo(6) + "-15", billing: 5, terms: 15,
     notes: "K-beauty importer. Biggest account, biggest concentration risk.",
+    finalDeal: "2.25L/mo flat — creatives and UGC bundled in",
   },
   {
     name: "Wellness Shop", engagement: "retainer", vip: false, status: "active",
@@ -86,6 +89,7 @@ const clients: SeedClient[] = [
     oneTime: 340000, delivery: 62000, health: "green", owner: "Laksh",
     start: monthsAgo(1) + "-01", end: addDays(today, 45), billing: 1, terms: 15,
     notes: "Site rebuild plus a creative bank. Billed in three phases.",
+    finalDeal: "3.4L fixed — 40/40/20 across three phases",
   },
   {
     name: "Bluewater Fit", engagement: "retainer", vip: false, status: "paused",
@@ -109,10 +113,10 @@ for (const client of clients) {
     ...named(
       `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services,
          retainer_amount, one_time_value, delivery_cost, start_date, end_date,
-         billing_day, terms_days, owner, health, notes)
+         billing_day, terms_days, owner, health, notes, final_deal)
        VALUES (@name, @slug, @status, @engagement, @vip, @services::jsonb,
          @retainer, @oneTime, @delivery, @start, @end,
-         @billing, @terms, @owner, @health, @notes)
+         @billing, @terms, @owner, @health, @notes, @finalDeal)
        RETURNING id`,
       {
         ...client,
@@ -121,6 +125,7 @@ for (const client of clients) {
         retainer: client.retainer ?? 0,
         oneTime: client.oneTime ?? 0,
         end: client.end ?? null,
+        finalDeal: client.finalDeal ?? null,
       },
     ),
   );
@@ -321,11 +326,105 @@ for (const [month, otherIncome, oneOff, notes] of [
   );
 }
 
+/* ------------------------------------------------------------ personal brand */
+
+// One piece per stage, so the content board shows the whole pipeline shape
+// on first run — an overdue shoot included, so the nudge is visible too.
+const contentPieces: {
+  title: string; status: string; platform: string; dimension: string;
+  hook?: string; script?: string; shootNotes?: string;
+  shoot?: string; post?: string; editor?: string;
+}[] = [
+  {
+    title: "Agency owners don't need more leads",
+    status: "concept", platform: "instagram_reel", dimension: "9x16",
+    hook: "You don't have a leads problem. You have a closing problem.",
+  },
+  {
+    title: "What ₹1L/month actually buys you",
+    status: "scripting", platform: "instagram_reel", dimension: "9x16",
+    hook: "Here's exactly where a one lakh retainer goes — line by line.",
+    script:
+      "HOOK — Here's exactly where a one lakh retainer goes — line by line.\n\n" +
+      "BODY — Media buyer time, creative production, testing budget breakdown.\n\nCTA — Comment 'BREAKDOWN' and I'll send the sheet.",
+  },
+  {
+    title: "3 creative tests before you scale",
+    status: "shoot_due", platform: "youtube_short", dimension: "9x16",
+    hook: "Scaling a winning ad too early is how you kill it.",
+    script:
+      "HOOK — Scaling a winning ad too early is how you kill it.\n\n" +
+      "BODY — Test hook, test format, test audience. One at a time, 3 days each.\n\n" +
+      "CTA — Follow for the full testing calendar.",
+    shootNotes: "Whiteboard behind, marker in hand. Cut to screen recording of the ad account.",
+    shoot: addDays(today, -2),
+  },
+  {
+    title: "Client red flags from 40+ audits",
+    status: "shot", platform: "instagram_reel", dimension: "4x5",
+    hook: "If a brand says this on the first call, we don't sign them.",
+    script:
+      "HOOK — If a brand says this on the first call, we don't sign them.\n\n" +
+      "BODY — The three red flags, one story each.\n\nCTA — Save this for your next sales call.",
+    shootNotes: "Desk setup, phone at eye level. B-roll of the audit sheet.",
+    shoot: addDays(today, -5), editor: "Sameer",
+  },
+  {
+    title: "The 3-second hook formula",
+    status: "editing", platform: "instagram_reel", dimension: "9x16",
+    hook: "Every scroll-stopping ad does these three things in three seconds.",
+    script:
+      "HOOK — Every scroll-stopping ad does these three things in three seconds.\n\n" +
+      "BODY — Pattern break, promise, proof. Example for each from live accounts.\n\n" +
+      "CTA — Follow for one teardown a week.",
+    shootNotes: "Talking head, captions burned in. Pull three ad examples as cutaways.",
+    shoot: addDays(today, -9), editor: "Sameer",
+  },
+  {
+    title: "Why we fired our best client",
+    status: "ready", platform: "linkedin", dimension: "1x1",
+    hook: "Our highest-paying client almost sank the agency. We let them go.",
+    script:
+      "HOOK — Our highest-paying client almost sank the agency. We let them go.\n\n" +
+      "BODY — Concentration risk, team burnout, the maths of saying no.\n\nCTA — What would you have done?",
+    shoot: addDays(today, -14), post: addDays(today, 2), editor: "Sameer",
+  },
+  {
+    title: "Month in the life of a D2C agency",
+    status: "posted", platform: "youtube_long", dimension: "16x9",
+    hook: "30 days, 7 clients, one camera.",
+    script: "Long-form — see the shot list in the drive folder.",
+    shoot: addDays(today, -30), post: addDays(today, -7), editor: "Sameer",
+  },
+];
+
+for (const piece of contentPieces) {
+  await db.query(
+    ...named(
+      `INSERT INTO foundery.content_pieces (title, status, platform, dimension, hook, script,
+         shoot_notes, shoot_date, post_date, editor)
+       VALUES (@title, @status, @platform, @dimension, @hook, @script,
+         @shootNotes, @shoot, @post, @editor)`,
+      {
+        ...piece,
+        hook: piece.hook ?? null,
+        script: piece.script ?? null,
+        shootNotes: piece.shootNotes ?? null,
+        shoot: piece.shoot ?? null,
+        post: piece.post ?? null,
+        editor: piece.editor ?? null,
+      },
+    ),
+  );
+}
+
 await setSetting("business_name", "Neuroid Media");
 await setSetting("cash_buffer", "1800000");
 
 console.log(
-  `Seeded ${clients.length} clients, ${costs.length} cost lines, ${counter - 1} invoices ` +
-    `and 1 onboarding form into ${usingPostgresServer() ? "PostgreSQL" : "the local PGlite database"}.`,
+  `Seeded ${clients.length} clients, ${costs.length} cost lines, ${counter - 1} invoices, ` +
+    `${contentPieces.length} content pieces and 1 onboarding form into ${
+      usingPostgresServer() ? "PostgreSQL" : "the local PGlite database"
+    }.`,
 );
 process.exit(0);

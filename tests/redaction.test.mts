@@ -12,8 +12,9 @@ const db = await getDb();
 
 const [kidology] = await db.query<{ id: number }>(
   `INSERT INTO foundery.clients (name, slug, status, engagement, vip, services, retainer_amount,
-     delivery_cost, start_date, billing_day, terms_days, health)
-   VALUES ('Kidology','kidology','active','retainer',true,'["UGC"]','185000','82000','2026-01-01',1,15,'green')
+     delivery_cost, start_date, billing_day, terms_days, health, final_deal)
+   VALUES ('Kidology','kidology','active','retainer',true,'["UGC"]','185000','82000','2026-01-01',1,15,'green',
+     '1.85L + 2% of adspend')
    RETURNING id`,
 );
 const [nordwell] = await db.query<{ id: number }>(
@@ -94,22 +95,28 @@ describe("clients: values follow the founder's switch", () => {
     assert.equal(client.retainer_amount, null);
     assert.equal(client.delivery_cost, null);
     assert.equal(client.health, null, "health is a commercial judgement, not an operational one");
+    assert.equal(client.final_deal, null, "the closed mandate is commercial too");
 
-    assert.ok(!JSON.stringify(await listClients("operator")).includes("185000"));
+    const serialised = JSON.stringify(await listClients("operator"));
+    assert.ok(!serialised.includes("185000"));
+    assert.ok(!serialised.includes("2% of adspend"), "no fragment of the deal text leaks");
   });
 
   test("founder sees the money", async () => {
     const [client] = await listClients("founder");
     assert.equal(client.retainer_amount, 185000);
     assert.equal(client.health, "green");
+    assert.equal(client.final_deal, "1.85L + 2% of adspend");
   });
 
   test("turning the switch on opens client values to the operator", async () => {
     await setSetting("operator_sees_client_values", "1");
     assert.equal((await policyFor("operator")).clientValues, true);
     assert.equal((await listClients("operator"))[0].retainer_amount, 185000);
+    assert.equal((await listClients("operator"))[0].final_deal, "1.85L + 2% of adspend");
     await setSetting("operator_sees_client_values", "0");
     assert.equal((await listClients("operator"))[0].retainer_amount, null);
+    assert.equal((await listClients("operator"))[0].final_deal, null);
   });
 
   test("no switch can open individual salaries", async () => {
