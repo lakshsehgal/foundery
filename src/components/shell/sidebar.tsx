@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useSyncExternalStore } from "react";
 import {
   BadgeIndianRupee, Banknote, ChevronsLeft, ChevronsRight, Clapperboard, FileText, LayoutGrid,
-  LineChart, Lock, LogOut, Moon, Receipt, Settings, Sun, Users, Wallet,
+  LineChart, Lock, LogOut, Moon, Receipt, Settings, Sun, UserRoundPlus, Users, Wallet,
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { Logo } from "@/components/ui/primitives";
@@ -25,6 +25,7 @@ const ITEMS: Item[] = [
   { href: "/invoices", label: "Invoices", icon: Receipt },
   { href: "/onboarding", label: "Onboarding", icon: FileText },
   { href: "/content", label: "Content", icon: Clapperboard },
+  { href: "/hiring", label: "Hiring", icon: UserRoundPlus },
   { href: "/founder", label: "Founder dashboard", icon: LineChart, founderOnly: true },
   { href: "/cashflow", label: "Cashflow", icon: Banknote, founderOnly: true },
   { href: "/pnl", label: "Profit & P&L", icon: BadgeIndianRupee, founderOnly: true },

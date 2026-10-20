@@ -229,6 +229,44 @@ create table if not exists foundery.settings (
   value text not null
 );
 
+-- Hiring: one row per role Neuroid is hiring for. Each role carries its own
+-- question set (jsonb, so the founder composes forms without migrations) and
+-- its own public token — /apply/<token> is the branded application page that
+-- gets shared with candidates.
+create table if not exists foundery.job_roles (
+  id          bigint generated always as identity primary key,
+  title       text not null,
+  slug        text unique,                        -- stable handle for the built-in roles
+  pitch       text,                               -- the sell, atop the public page
+  location    text not null default 'Ghitorni, New Delhi — on-site',
+  employment  text not null default 'full_time',  -- full_time | part_time | internship | contract
+  token       text not null unique,               -- the public URL segment
+  fields      jsonb not null default '[]'::jsonb, -- role-specific questions
+  status      text not null default 'open',       -- open | closed
+  created_by  text not null default 'founder',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+-- Every application, whichever role it came through. The fixed columns are
+-- what every candidate gives (who they are, whether Delhi works); the
+-- role-specific answers live in jsonb keyed by the role's question keys.
+create table if not exists foundery.job_applicants (
+  id         bigint generated always as identity primary key,
+  role_id    bigint not null references foundery.job_roles(id) on delete cascade,
+  name       text not null,
+  email      text not null,
+  phone      text,
+  city       text,
+  relocation text not null default 'delhi',       -- delhi | relocate | no
+  resume_url text,
+  answers    jsonb not null default '{}'::jsonb,
+  stage      text not null default 'applied',     -- applied | shortlisted | interview | offer | hired | rejected
+  notes      text,                                -- the team's own notes, never the candidate's
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_applicants_role on foundery.job_applicants(role_id);
+
 create table if not exists foundery.audit_log (
   id        bigint generated always as identity primary key,
   ts        timestamptz not null default now(),
@@ -254,3 +292,5 @@ alter table foundery.login_codes            enable row level security;
 alter table foundery.raised_invoices        enable row level security;
 alter table foundery.audit_log              enable row level security;
 alter table foundery.content_pieces         enable row level security;
+alter table foundery.job_roles              enable row level security;
+alter table foundery.job_applicants         enable row level security;

@@ -30,7 +30,8 @@ if (force) {
   await db.exec(`
     TRUNCATE foundery.onboarding_submissions, foundery.onboarding_forms,
              foundery.invoices, foundery.costs, foundery.clients,
-             foundery.pnl_months, foundery.audit_log, foundery.content_pieces
+             foundery.pnl_months, foundery.audit_log, foundery.content_pieces,
+             foundery.job_applicants, foundery.job_roles
     RESTART IDENTITY CASCADE;
   `);
 }
@@ -421,9 +422,105 @@ for (const piece of contentPieces) {
 await setSetting("business_name", "Neuroid Media");
 await setSetting("cash_buffer", "1800000");
 
+/* ------------------------------------------------------------------ hiring */
+
+// The four starter roles, exactly as the app would plant them on first load,
+// plus a spread of applicants so the pipeline has something to show.
+const { STARTER_ROLES } = await import("../src/lib/hiring");
+const token = () => crypto.randomBytes(18).toString("base64url");
+
+for (const role of STARTER_ROLES) {
+  await db.query(
+    `INSERT INTO foundery.job_roles (title, slug, pitch, token, fields)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
+     ON CONFLICT (slug) DO NOTHING`,
+    [role.title, role.slug, role.pitch, token(), JSON.stringify(role.fields)],
+  );
+}
+
+const seededRoles = await db.query<{ id: number; slug: string }>(
+  `SELECT id, slug FROM foundery.job_roles`,
+);
+const roleId = (slug: string) => seededRoles.find((role) => role.slug === slug)?.id ?? null;
+
+const applicants: {
+  slug: string; name: string; email: string; phone: string; city: string;
+  relocation: string; stage: string; answers: Record<string, string>; resume?: string;
+}[] = [
+  {
+    slug: "founders-office-associate", name: "Ananya Gupta", email: "ananya.g@example.com",
+    phone: "+91 98100 11223", city: "New Delhi", relocation: "delhi", stage: "shortlisted",
+    resume: "https://www.linkedin.com/in/example-ananya",
+    answers: {
+      why_founders_office: "I want to see every function of a business up close before starting my own.",
+      ownership_story: "Ran my college fest's sponsorship end-to-end — 14 brands, ₹9L raised.",
+      current_status: "Final-year BBA, Delhi University",
+      expected_salary: "35–40k",
+      start_date: "Within two weeks",
+    },
+  },
+  {
+    slug: "founders-office-associate", name: "Rohan Mehta", email: "rohan.m@example.com",
+    phone: "+91 99887 66554", city: "Jaipur", relocation: "relocate", stage: "applied",
+    answers: {
+      why_founders_office: "Agency land is where the fastest learning is.",
+      ownership_story: "Built and sold a sneaker reselling page with 40k followers.",
+      current_status: "Working at a startup in Jaipur",
+      expected_salary: "45k",
+      start_date: "One month notice",
+    },
+  },
+  {
+    slug: "hr-executive", name: "Priyanka Shah", email: "priyanka.s@example.com",
+    phone: "+91 98201 44556", city: "Gurugram", relocation: "delhi", stage: "interview",
+    answers: {
+      hr_experience: "4 years",
+      hiring_process: "JD → sourcing on Naukri/LinkedIn → screening calls → structured rounds → offer and references.",
+      tools: "Naukri, LinkedIn Recruiter, Keka",
+      expected_salary: "55k",
+      start_date: "15 days",
+    },
+  },
+  {
+    slug: "content-associate", name: "Kabir Anand", email: "kabir.a@example.com",
+    phone: "+91 97110 22334", city: "Mumbai", relocation: "no", stage: "applied",
+    answers: {
+      work_links: "instagram.com/example.reel1\nyoutube.com/@examplekabir",
+      skills: "Script and edit — Premiere Pro and CapCut. Shoot on an iPhone 15 Pro rig.",
+      expected_salary: "40k",
+      start_date: "Immediately",
+    },
+  },
+  {
+    slug: "operations-admin-executive", name: "Sneha Reddy", email: "sneha.r@example.com",
+    phone: "+91 96500 77889", city: "Noida", relocation: "delhi", stage: "applied",
+    answers: {
+      billing_experience: "Handled invoicing and follow-ups for a 30-client CA firm on Zoho Books.",
+      admin_experience: "Vendor contracts, office supplies and travel for a 25-person office.",
+      spreadsheets: "Very — pivot tables and lookups daily.",
+      expected_salary: "38k",
+      start_date: "Two weeks",
+    },
+  },
+];
+
+for (const applicant of applicants) {
+  const id = roleId(applicant.slug);
+  if (!id) continue;
+  await db.query(
+    `INSERT INTO foundery.job_applicants (role_id, name, email, phone, city, relocation, resume_url, answers, stage)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
+    [
+      id, applicant.name, applicant.email, applicant.phone, applicant.city,
+      applicant.relocation, applicant.resume ?? null, JSON.stringify(applicant.answers), applicant.stage,
+    ],
+  );
+}
+
 console.log(
   `Seeded ${clients.length} clients, ${costs.length} cost lines, ${counter - 1} invoices, ` +
-    `${contentPieces.length} content pieces and 1 onboarding form into ${
+    `${contentPieces.length} content pieces, ${STARTER_ROLES.length} job roles, ` +
+    `${applicants.length} applicants and 1 onboarding form into ${
       usingPostgresServer() ? "PostgreSQL" : "the local PGlite database"
     }.`,
 );

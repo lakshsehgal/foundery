@@ -3,7 +3,7 @@ import { getDb } from "./db";
 import type { Role } from "./session";
 import { policyFor } from "./policy";
 import { monthlyEquivalent } from "./money";
-import { billingDateFor, daysUntil, lastMonths, monthLabel, todayISO } from "./dates";
+import { billingDateFor, daysUntil, lastMonths, monthLabel, toISO, todayISO } from "./dates";
 import type {
   ClientStatus, ContentDimension, ContentPlatform, ContentStatus, CostCategory,
   Engagement, Health, OnboardingField, OnboardingFlow,
@@ -12,6 +12,9 @@ import {
   CATEGORY_LABEL, CONTENT_PIPELINE, COST_CATEGORIES, isContentDimension,
   isContentPlatform, isContentStatus,
 } from "./taxonomy";
+import type { ApplicantStage, Employment, Relocation } from "./hiring";
+import { STARTER_ROLES, isApplicantStage, isEmployment, isRelocation } from "./hiring";
+import { newPublicToken } from "./session";
 
 /* --------------------------------------------------------------- clients */
 
@@ -744,4 +747,142 @@ export function publicWelcomeUrl(token: string): string {
       : "http://localhost:3000")
   ).replace(/\/$/, "");
   return `${base}/welcome/${token}`;
+}
+
+/* ----------------------------------------------------------------- hiring */
+
+export type JobRoleView = {
+  id: number;
+  title: string;
+  slug: string | null;
+  pitch: string | null;
+  location: string;
+  employment: Employment;
+  token: string;
+  fields: OnboardingField[];
+  status: "open" | "closed";
+  created_at: string;
+};
+
+type JobRoleRow = {
+  id: number; title: string; slug: string | null; pitch: string | null;
+  location: string; employment: string; token: string; fields: unknown;
+  status: string; created_at: string;
+};
+
+function toJobRole(row: JobRoleRow): JobRoleView {
+  return {
+    ...row,
+    employment: isEmployment(row.employment) ? row.employment : "full_time",
+    fields: toFields(row.fields),
+    status: row.status === "closed" ? "closed" : "open",
+  };
+}
+
+export async function listJobRoles(): Promise<JobRoleView[]> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<JobRoleRow>(
+      `SELECT * FROM foundery.job_roles ORDER BY created_at ASC`,
+    );
+    return rows.map(toJobRole);
+  } catch {
+    // The table ships in db/schema.sql; until it's applied the section is
+    // simply empty rather than the page going down.
+    console.warn("foundery.job_roles missing — re-run db/schema.sql to enable hiring");
+    return [];
+  }
+}
+
+export async function getJobRoleByToken(token: string): Promise<JobRoleView | null> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<JobRoleRow>(
+      `SELECT * FROM foundery.job_roles WHERE token = $1`,
+      [token],
+    );
+    return rows[0] ? toJobRole(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The four built-in roles, created the first time the hiring section loads
+ * against an empty table. Each gets a fresh random token here (never one
+ * committed to the repo), and after creation they're ordinary editable rows —
+ * re-running this against a non-empty table does nothing.
+ */
+export async function ensureStarterRoles(): Promise<void> {
+  const db = await getDb();
+  try {
+    const [{ count }] = await db.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM foundery.job_roles`,
+    );
+    if (count > 0) return;
+    for (const role of STARTER_ROLES) {
+      await db.query(
+        `INSERT INTO foundery.job_roles (title, slug, pitch, token, fields)
+         VALUES ($1, $2, $3, $4, $5::jsonb)
+         ON CONFLICT (slug) DO NOTHING`,
+        [role.title, role.slug, role.pitch, newPublicToken(), JSON.stringify(role.fields)],
+      );
+    }
+  } catch {
+    // Table not there yet — listJobRoles already warns about the schema.
+  }
+}
+
+export type JobApplicantView = {
+  id: number;
+  role_id: number;
+  role_title: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  city: string | null;
+  relocation: Relocation;
+  resume_url: string | null;
+  answers: Record<string, string>;
+  stage: ApplicantStage;
+  notes: string | null;
+  created_at: string;
+};
+
+export async function listJobApplicants(): Promise<JobApplicantView[]> {
+  const db = await getDb();
+  try {
+    const rows = await db.query<{
+      id: number; role_id: number; role_title: string; name: string; email: string;
+      phone: string | null; city: string | null; relocation: string;
+      resume_url: string | null; answers: unknown; stage: string;
+      notes: string | null; created_at: string;
+    }>(
+      `SELECT a.*, r.title AS role_title
+       FROM foundery.job_applicants a
+       JOIN foundery.job_roles r ON r.id = a.role_id
+       ORDER BY a.created_at DESC`,
+    );
+    return rows.map((row) => ({
+      ...row,
+      relocation: isRelocation(row.relocation) ? row.relocation : "delhi",
+      stage: isApplicantStage(row.stage) ? row.stage : "applied",
+      answers: toRecord<string>(row.answers),
+      // timestamptz comes back with a time attached (or as a Date object);
+      // prettyDate wants a plain calendar day.
+      created_at: toISO(new Date(row.created_at)),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export function publicApplyUrl(token: string): string {
+  const base = (
+    process.env.FOUNDERY_PUBLIC_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000")
+  ).replace(/\/$/, "");
+  return `${base}/apply/${token}`;
 }
