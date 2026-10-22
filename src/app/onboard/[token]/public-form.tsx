@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { CheckCircle2, Send } from "lucide-react";
 import { submitOnboarding, type SubmitState } from "@/app/actions/onboarding";
-import { Button, Field, TextArea, TextInput } from "@/components/ui/form";
+import { Button, CheckboxGroup, Field, Select, TextArea, TextInput } from "@/components/ui/form";
 import type { OnboardingField } from "@/lib/taxonomy";
 
 export function PublicForm({ token, fields }: { token: string; fields: OnboardingField[] }) {
@@ -54,6 +54,23 @@ export function PublicForm({ token, fields }: { token: string; fields: Onboardin
         >
           {field.type === "textarea" ? (
             <TextArea id={`f_${field.key}`} name={`f_${field.key}`} rows={3} required={field.required} />
+          ) : field.type === "select" ? (
+            <Select id={`f_${field.key}`} name={`f_${field.key}`} required={field.required} defaultValue="">
+              <option value="" disabled={field.required}>
+                {field.required ? "Pick one" : "No answer"}
+              </option>
+              {(field.options ?? []).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </Select>
+          ) : field.type === "checkbox" ? (
+            <CheckboxGroup
+              name={`f_${field.key}`}
+              options={field.options ?? []}
+              required={field.required}
+            />
           ) : (
             <TextInput
               id={`f_${field.key}`}

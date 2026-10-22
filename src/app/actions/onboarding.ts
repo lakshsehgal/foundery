@@ -4,9 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
 import { getDb, logAudit, named } from "@/lib/db";
 import {
-  ACCESS_NOTES_KEY, FIELD_TYPES, ONBOARDING_FLOWS, accessItemsFor, detailFieldsFor,
+  ACCESS_NOTES_KEY, ONBOARDING_FLOWS, accessItemsFor, detailFieldsFor,
   type OnboardingField, type OnboardingFlow,
 } from "@/lib/taxonomy";
+import { collectAnswers, fieldMissingOptions, fieldsFromRows } from "@/lib/hiring";
 import { getFormByToken, getGuidedByToken, publicWelcomeUrl } from "@/lib/queries";
 import type { ActionState } from "./clients";
 
@@ -16,43 +17,17 @@ function text(form: FormData, key: string): string | null {
 }
 
 /**
- * Turns the repeated form rows into field definitions. Keys are derived from
- * the label so the founder never has to think about them, and de-duplicated
- * so two questions can't overwrite each other's answers.
+ * Turns the repeated form rows into field definitions — shared with the
+ * hiring builder, where the key-derivation and option-parsing rules live.
  */
 function readFields(form: FormData): OnboardingField[] {
-  const labels = form.getAll("field_label").map(String);
-  const types = form.getAll("field_type").map(String);
-  const required = form.getAll("field_required").map(String);
-  const hints = form.getAll("field_hint").map(String);
-
-  const seen = new Set<string>();
-  const out: OnboardingField[] = [];
-
-  labels.forEach((label, index) => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
-    const base =
-      trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "question";
-    let key = base;
-    let n = 2;
-    while (seen.has(key)) key = `${base}_${n++}`;
-    seen.add(key);
-
-    const type = FIELD_TYPES.includes(types[index] as (typeof FIELD_TYPES)[number])
-      ? (types[index] as OnboardingField["type"])
-      : "text";
-
-    out.push({
-      key,
-      label: trimmed,
-      type,
-      required: required[index] === "1",
-      hint: (hints[index] ?? "").trim() || undefined,
-    });
+  return fieldsFromRows({
+    labels: form.getAll("field_label").map(String),
+    types: form.getAll("field_type").map(String),
+    required: form.getAll("field_required").map(String),
+    hints: form.getAll("field_hint").map(String),
+    options: form.getAll("field_options").map(String),
   });
-
-  return out;
 }
 
 /** Both roles run onboarding, so both can build and share a form. */
@@ -66,6 +41,12 @@ export async function saveForm(_prev: ActionState, form: FormData): Promise<Acti
 
   const fields = readFields(form);
   if (fields.length === 0) return { error: "A form with no questions collects nothing. Add at least one." };
+  const optionless = fieldMissingOptions(fields);
+  if (optionless) {
+    return {
+      error: `“${optionless.label}” needs at least two choices — comma-separate them in the options box.`,
+    };
+  }
 
   const status = String(form.get("status")) === "closed" ? "closed" : "open";
   const payload = {
@@ -152,12 +133,12 @@ export async function submitOnboarding(_prev: SubmitState, form: FormData): Prom
   // A hidden field no human ever fills. Bots do.
   if (String(form.get("company_website_confirm") ?? "") !== "") return { done: true };
 
-  const answers: Record<string, string> = {};
-  for (const field of definition.fields) {
-    const value = String(form.get(`f_${field.key}`) ?? "").trim();
-    if (field.required && !value) return { error: `“${field.label}” is needed before you can send this.` };
-    if (value) answers[field.key] = value.slice(0, 4000);
-  }
+  const { answers, error } = collectAnswers(
+    definition.fields,
+    (key) => form.getAll(key).map(String),
+    "f_",
+  );
+  if (error) return { error };
 
   const db = await getDb();
   await db.query(

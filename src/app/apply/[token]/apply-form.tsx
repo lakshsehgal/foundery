@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { CheckCircle2, Send } from "lucide-react";
 import { submitApplication, type ApplyState } from "@/app/actions/hiring";
-import { Button, Field, Select, TextArea, TextInput } from "@/components/ui/form";
+import { Button, CheckboxGroup, Field, Select, TextArea, TextInput } from "@/components/ui/form";
 import { BASE_APPLICANT_FIELDS, RELOCATION, type Relocation } from "@/lib/hiring";
 import type { OnboardingField } from "@/lib/taxonomy";
 
@@ -101,6 +101,23 @@ export function ApplyForm({ token, fields }: { token: string; fields: Onboarding
             >
               {field.type === "textarea" ? (
                 <TextArea id={`q_${field.key}`} name={`q_${field.key}`} rows={4} required={field.required} />
+              ) : field.type === "select" ? (
+                <Select id={`q_${field.key}`} name={`q_${field.key}`} required={field.required} defaultValue="">
+                  <option value="" disabled={field.required}>
+                    {field.required ? "Pick one" : "No answer"}
+                  </option>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </Select>
+              ) : field.type === "checkbox" ? (
+                <CheckboxGroup
+                  name={`q_${field.key}`}
+                  options={field.options ?? []}
+                  required={field.required}
+                />
               ) : (
                 <TextInput
                   id={`q_${field.key}`}

@@ -17,13 +17,15 @@ const TYPE_LABEL: Record<string, string> = {
   email: "Email",
   url: "Link",
   number: "Number",
+  select: "Dropdown — pick one",
+  checkbox: "Checkboxes — tick any",
 };
 
-type Draft = OnboardingField & { uid: string };
+type Draft = OnboardingField & { uid: string; optionsText: string };
 
 let counter = 0;
 function withUid(field: OnboardingField): Draft {
-  return { ...field, uid: `q${counter++}` };
+  return { ...field, uid: `q${counter++}`, optionsText: field.options?.join(", ") ?? "" };
 }
 
 const STARTER_QUESTIONS: OnboardingField[] = [
@@ -194,6 +196,20 @@ export function RoleEditor({
                       aria-label={`Hint for question ${index + 1}`}
                       className="sm:col-span-2"
                     />
+                    {field.type === "select" || field.type === "checkbox" ? (
+                      <TextInput
+                        name="field_options"
+                        value={field.optionsText}
+                        onChange={(event) => update(field.uid, { optionsText: event.target.value })}
+                        placeholder="The choices, comma-separated — e.g. Yes, No, Depends"
+                        aria-label={`Choices for question ${index + 1}`}
+                        className="sm:col-span-2"
+                      />
+                    ) : (
+                      // Submitted for every row so the options line up with
+                      // the labels by index on the server.
+                      <input type="hidden" name="field_options" value="" />
+                    )}
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">

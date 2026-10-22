@@ -148,7 +148,7 @@ export function defaultFields(): OnboardingField[] {
   }));
 }
 
-export const FIELD_TYPES = ["text", "email", "url", "textarea", "number"] as const;
+export const FIELD_TYPES = ["text", "email", "url", "textarea", "number", "select", "checkbox"] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 export type OnboardingField = {
@@ -157,6 +157,8 @@ export type OnboardingField = {
   type: FieldType;
   required: boolean;
   hint?: string;
+  /** The choices for a select (pick one) or checkbox (tick all that apply). */
+  options?: string[];
 };
 
 /* ------------------------------------------------------- guided onboarding */

@@ -2,7 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 const {
-  STARTER_ROLES, collectAnswers, fieldsFromRows, isApplicantStage, isRelocation,
+  STARTER_ROLES, collectAnswers, fieldsFromRows, fieldMissingOptions, isApplicantStage,
+  isRelocation, parseOptions,
 } = await import("../src/lib/hiring");
 
 describe("starter roles", () => {
@@ -37,29 +38,94 @@ describe("collectAnswers", () => {
     { key: "why", label: "Why Neuroid?", type: "textarea" as const, required: true },
     { key: "portfolio", label: "Portfolio", type: "url" as const, required: false },
   ];
+  const lookup = (posted: Record<string, string | string[]>) => (key: string) => {
+    const value = posted[key];
+    return value === undefined ? [] : Array.isArray(value) ? value : [value];
+  };
 
   test("a missing required answer stops the submission and names the question", () => {
-    const { error } = collectAnswers(fields, () => "");
+    const { error } = collectAnswers(fields, () => []);
     assert.match(error ?? "", /Why Neuroid\?/);
   });
 
   test("keeps declared answers, drops everything else", () => {
-    const posted: Record<string, string> = {
-      q_why: "Because the work ships.",
-      q_portfolio: "",
-      q_injected: "<script>alert(1)</script>",
-      stage: "hired",
-    };
-    const { answers, error } = collectAnswers(fields, (key) => posted[key] ?? "");
+    const { answers, error } = collectAnswers(
+      fields,
+      lookup({
+        q_why: "Because the work ships.",
+        q_portfolio: "",
+        q_injected: "<script>alert(1)</script>",
+        stage: "hired",
+      }),
+    );
     assert.equal(error, undefined);
     assert.deepEqual(answers, { why: "Because the work ships." });
   });
 
   test("length-caps a hostile answer", () => {
-    const { answers } = collectAnswers(fields, (key) =>
-      key === "q_why" ? "x".repeat(10000) : "",
-    );
+    const { answers } = collectAnswers(fields, lookup({ q_why: "x".repeat(10000) }));
     assert.equal(answers.why.length, 4000);
+  });
+
+  const choiceFields = [
+    {
+      key: "mode", label: "Work mode", type: "select" as const, required: true,
+      options: ["From the office", "Hybrid"],
+    },
+    {
+      key: "skills", label: "Skills", type: "checkbox" as const, required: true,
+      options: ["Scripting", "Shooting", "Editing"],
+    },
+  ];
+
+  test("a dropdown only accepts one of its listed choices", () => {
+    const { error } = collectAnswers(
+      choiceFields,
+      lookup({ q_mode: "Fully remote", q_skills: "Editing" }),
+    );
+    assert.match(error ?? "", /Work mode/);
+
+    const ok = collectAnswers(
+      choiceFields,
+      lookup({ q_mode: "Hybrid", q_skills: "Editing" }),
+    );
+    assert.equal(ok.error, undefined);
+    assert.equal(ok.answers.mode, "Hybrid");
+  });
+
+  test("checkboxes join the ticked choices and drop smuggled ones", () => {
+    const { answers, error } = collectAnswers(
+      choiceFields,
+      lookup({ q_mode: "Hybrid", q_skills: ["Shooting", "Editing", "free text injection"] }),
+    );
+    assert.equal(error, undefined);
+    assert.equal(answers.skills, "Shooting, Editing");
+  });
+
+  test("a required checkbox question with nothing ticked stops the submission", () => {
+    const { error } = collectAnswers(choiceFields, lookup({ q_mode: "Hybrid" }));
+    assert.match(error ?? "", /Skills/);
+  });
+});
+
+describe("options", () => {
+  test("parseOptions splits, trims, de-duplicates and caps", () => {
+    assert.deepEqual(parseOptions(" Yes , No\nyes, Maybe ,,"), ["Yes", "No", "Maybe"]);
+    assert.equal(parseOptions(Array.from({ length: 30 }, (_, i) => `o${i}`).join(",")).length, 20);
+  });
+
+  test("fieldMissingOptions flags a choice question with fewer than two", () => {
+    const bad = fieldMissingOptions([
+      { key: "a", label: "Pick", type: "select", required: true, options: ["Only one"] },
+    ]);
+    assert.equal(bad?.key, "a");
+    assert.equal(
+      fieldMissingOptions([
+        { key: "a", label: "Pick", type: "select", required: true, options: ["Yes", "No"] },
+        { key: "b", label: "Free", type: "text", required: false },
+      ]),
+      null,
+    );
   });
 });
 
@@ -79,6 +145,18 @@ describe("fieldsFromRows", () => {
     assert.equal(fields[1].hint, "second ask");
     // An unknown type falls back to a short answer rather than failing.
     assert.equal(fields[2].type, "text");
+  });
+
+  test("choices attach to dropdown and checkbox questions only", () => {
+    const fields = fieldsFromRows({
+      labels: ["Work mode", "Your name"],
+      types: ["select", "text"],
+      required: ["1", "1"],
+      hints: ["", ""],
+      options: ["Office, Hybrid, Remote", "ignored, for, text"],
+    });
+    assert.deepEqual(fields[0].options, ["Office", "Hybrid", "Remote"]);
+    assert.equal(fields[1].options, undefined);
   });
 });
 

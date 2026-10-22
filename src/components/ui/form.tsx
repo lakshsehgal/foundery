@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
 const inputBase =
@@ -44,6 +45,41 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
         ...props.style,
       }}
     />
+  );
+}
+
+/**
+ * A tick-all-that-apply group that posts one value per ticked box under the
+ * same name. HTML can't natively require "at least one of these", so every
+ * box is marked required until one is ticked — the browser then blocks an
+ * empty required group the way it blocks an empty required input, instead of
+ * a server round-trip that wipes what was already typed.
+ */
+export function CheckboxGroup({
+  name, options, required,
+}: {
+  name: string;
+  options: string[];
+  required?: boolean;
+}) {
+  const [picked, setPicked] = useState(0);
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      {options.map((option) => (
+        <label key={option} className="flex cursor-pointer items-center gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            name={name}
+            value={option}
+            required={required && picked === 0}
+            onChange={(event) => setPicked((n) => n + (event.target.checked ? 1 : -1))}
+            className="h-3.5 w-3.5 shrink-0 accent-[var(--color-accent)]"
+          />
+          {option}
+        </label>
+      ))}
+    </div>
   );
 }
 

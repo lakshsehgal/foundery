@@ -72,22 +72,74 @@ export const BASE_APPLICANT_FIELDS = [
 /**
  * Collects a submission's answers against the questions a role actually
  * declares — unknown keys are dropped rather than stored, required gaps stop
- * the submission, and everything is length-capped. Pure, so the tests can
- * throw hostile input at it without a database.
+ * the submission, a dropdown only accepts one of its listed choices, ticked
+ * checkboxes join into one answer, and everything is length-capped. Pure, so
+ * the tests can throw hostile input at it without a database.
  */
 export function collectAnswers(
   fields: OnboardingField[],
-  get: (key: string) => string,
+  getAll: (key: string) => string[],
+  prefix = "q_",
 ): { answers: Record<string, string>; error?: string } {
   const answers: Record<string, string> = {};
   for (const field of fields) {
-    const value = get(`q_${field.key}`).trim();
+    const raw = getAll(`${prefix}${field.key}`)
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    let value: string;
+    if (field.type === "checkbox") {
+      // Only the declared choices count — a crafted post can't smuggle in
+      // free text through a tick-box question.
+      const allowed = field.options ?? [];
+      value = raw.filter((item) => allowed.includes(item)).join(", ");
+    } else if (field.type === "select") {
+      value = raw[0] ?? "";
+      if (value && !(field.options ?? []).includes(value)) {
+        return { answers: {}, error: `“${field.label}” needs one of the listed choices.` };
+      }
+    } else {
+      value = raw[0] ?? "";
+    }
+
     if (field.required && !value) {
       return { answers: {}, error: `“${field.label}” is needed before you can send this.` };
     }
     if (value) answers[field.key] = value.slice(0, 4000);
   }
   return { answers };
+}
+
+/**
+ * One comma- or newline-separated string from the builder into a clean list
+ * of choices: trimmed, de-duplicated case-insensitively, each capped, at
+ * most twenty.
+ */
+export function parseOptions(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[\n,]/)) {
+    const trimmed = part.trim().slice(0, 100);
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+    seen.add(trimmed.toLowerCase());
+    out.push(trimmed);
+    if (out.length === 20) break;
+  }
+  return out;
+}
+
+/**
+ * A question that offers choices but fewer than two of them isn't a question.
+ * Returns the offending field for the action to name, or null when all good.
+ */
+export function fieldMissingOptions(fields: OnboardingField[]): OnboardingField | null {
+  return (
+    fields.find(
+      (field) =>
+        (field.type === "select" || field.type === "checkbox") &&
+        (field.options?.length ?? 0) < 2,
+    ) ?? null
+  );
 }
 
 /**
@@ -98,6 +150,7 @@ export function collectAnswers(
  */
 export function fieldsFromRows(rows: {
   labels: string[]; types: string[]; required: string[]; hints: string[];
+  options?: string[];
 }): OnboardingField[] {
   const seen = new Set<string>();
   const out: OnboardingField[] = [];
@@ -117,12 +170,16 @@ export function fieldsFromRows(rows: {
       ? (rows.types[index] as OnboardingField["type"])
       : "text";
 
+    const choices =
+      type === "select" || type === "checkbox" ? parseOptions(rows.options?.[index] ?? "") : [];
+
     out.push({
       key,
       label: trimmed,
       type,
       required: rows.required[index] === "1",
       hint: (rows.hints[index] ?? "").trim() || undefined,
+      options: choices.length > 0 ? choices : undefined,
     });
   });
 

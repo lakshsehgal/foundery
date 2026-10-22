@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireFounder, requireRole, newPublicToken } from "@/lib/auth";
 import { getDb, logAudit, named } from "@/lib/db";
 import {
-  DEFAULT_LOCATION, collectAnswers, fieldsFromRows, isApplicantStage, isEmployment, isRelocation,
+  DEFAULT_LOCATION, collectAnswers, fieldMissingOptions, fieldsFromRows, isApplicantStage,
+  isEmployment, isRelocation,
 } from "@/lib/hiring";
 import { getJobRoleByToken } from "@/lib/queries";
 import type { ActionState } from "./clients";
@@ -31,9 +32,16 @@ export async function saveJobRole(_prev: ActionState, form: FormData): Promise<A
     types: form.getAll("field_type").map(String),
     required: form.getAll("field_required").map(String),
     hints: form.getAll("field_hint").map(String),
+    options: form.getAll("field_options").map(String),
   });
   if (fields.length === 0) {
     return { error: "A role with no questions screens nobody. Add at least one." };
+  }
+  const optionless = fieldMissingOptions(fields);
+  if (optionless) {
+    return {
+      error: `“${optionless.label}” needs at least two choices — comma-separate them in the options box.`,
+    };
   }
 
   const employmentRaw = String(form.get("employment") ?? "full_time");
@@ -140,7 +148,9 @@ export async function submitApplication(_prev: ApplyState, form: FormData): Prom
 
   const resume = String(form.get("resume_url") ?? "").trim().slice(0, 500) || null;
 
-  const { answers, error } = collectAnswers(role.fields, (key) => String(form.get(key) ?? ""));
+  const { answers, error } = collectAnswers(role.fields, (key) =>
+    form.getAll(key).map(String),
+  );
   if (error) return { error };
 
   const db = await getDb();
