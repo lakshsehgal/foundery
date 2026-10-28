@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { AlertTriangle, ShieldCheck, TriangleAlert } from "lucide-react";
-import { requireFounder } from "@/lib/auth";
-import { clientEconomics, efficiency, headline, mediaBuyerLoad, projection, riskReport } from "@/lib/analytics";
+import { requireFinance } from "@/lib/auth";
+import {
+  clientEconomics, efficiency, headline, mediaBuyerLoad, projection, riskReport, serviceRevenue,
+} from "@/lib/analytics";
 import { costTotals } from "@/lib/queries";
 import { defaultCurrency, fmtCompact, fmtMoney, fmtPct } from "@/lib/money";
 import { CATEGORY_LABEL, CATEGORY_TONE, HEALTH } from "@/lib/taxonomy";
@@ -43,43 +45,45 @@ const BAND_COPY = {
 } as const;
 
 export default async function FounderPage() {
-  await requireFounder();
+  await requireFinance();
 
   const currency = defaultCurrency();
-  const [head, economics, forecast, risk, totals, buyerLoad] = await Promise.all([
+  const [head, economics, forecast, risk, totals, buyerLoad, services] = await Promise.all([
     headline(),
     clientEconomics(),
     projection(6),
     riskReport(),
     costTotals(),
     mediaBuyerLoad(),
+    serviceRevenue(),
   ]);
   const burn = totals.reduce((sum, row) => sum + row.total, 0);
   const lever = efficiency(head, totals);
   const band = BAND_COPY[risk.band];
   const BandIcon = band.icon;
 
-  // The two halves of the book, each with its own subtotal: money that renews
-  // by itself, and money that has to be re-sold when the work ships.
+  // The two lines of business, each with its own subtotal and its own units:
+  // performance retainers are monthly money; creative one-offs are whole
+  // contracts, landing in the month they kick off.
   const books = [
     {
       key: "retainer",
-      label: "Retainers",
-      hint: "Recurring — renews every month",
+      label: "Performance — retainers",
+      hint: "Per month · renews by itself",
       tone: "var(--color-series-1)",
       clients: economics.filter((c) => c.engagement === "retainer"),
     },
     {
       key: "one_time",
-      label: "One-off projects",
-      hint: "Spread across the months they run, then gone",
+      label: "Creative — one-off projects",
+      hint: "Whole contract · lands in the kickoff month, costs run across its months",
       tone: "var(--color-series-4)",
       clients: economics.filter((c) => c.engagement !== "retainer"),
     },
   ]
     .map((book) => ({
       ...book,
-      mrr: book.clients.reduce((sum, c) => sum + c.mrr, 0),
+      value: book.clients.reduce((sum, c) => sum + c.bookValue, 0),
       deliveryCost: book.clients.reduce((sum, c) => sum + c.deliveryCost, 0),
     }))
     .filter((book) => book.clients.length > 0);
@@ -90,10 +94,10 @@ export default async function FounderPage() {
       <PageBody width={1120}>
         <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
-            label="Monthly revenue"
-            count={<Ticker value={head.mrr} format="compact" currency={currency} />}
+            label="Revenue this month"
+            count={<Ticker value={head.revenue} format="compact" currency={currency} />}
             tone="var(--color-series-1)"
-            hint={`${fmtCompact(head.recurring, currency)} recurring · ${fmtCompact(head.project, currency)} projects`}
+            hint={`${fmtCompact(head.performance, currency)} performance · ${fmtCompact(head.creative, currency)} creative landing now`}
           />
           <StatTile
             label="Monthly cost base"
@@ -297,30 +301,59 @@ export default async function FounderPage() {
         {/* --------------------------------------------------- revenue mix */}
         <Card>
           <CardTitle
-            title="Revenue mix — recurring vs one-off"
-            hint="A retainer renews by itself; a project has to be re-sold when it ships. The mix says how much of next month is already won."
+            title="Revenue mix — performance vs creative"
+            hint="Performance is the retainer book and renews by itself; creative lands once, in the month a project kicks off, and has to be re-sold. The mix says how much of next month is already won."
           />
           <BarRow
-            label={`Retainers · ${head.retainerClients} client${head.retainerClients === 1 ? "" : "s"}`}
-            value={head.recurring}
-            total={head.mrr}
+            label={`Performance retainers · ${head.retainerClients} client${head.retainerClients === 1 ? "" : "s"}`}
+            value={head.performance}
+            total={head.revenue}
             tone="var(--color-series-1)"
-            right={fmtMoney(head.recurring, currency)}
+            right={`${fmtMoney(head.performance, currency)} / mo`}
           />
           <BarRow
-            label={`One-off projects · ${head.projectClients} client${head.projectClients === 1 ? "" : "s"}`}
-            value={head.project}
-            total={head.mrr}
+            label={`Creative one-offs landing this month · ${head.projectClients} active project${head.projectClients === 1 ? "" : "s"}`}
+            value={head.creative}
+            total={head.revenue}
             tone="var(--color-series-4)"
-            right={fmtMoney(head.project, currency)}
+            right={fmtMoney(head.creative, currency)}
           />
         </Card>
+
+        {/* ----------------------------------------------- revenue by service */}
+        {services.length > 0 && (
+          <Card>
+            <CardTitle
+              title="Revenue by service — this month"
+              hint="Where the month's contracted revenue actually comes from. A client's revenue splits evenly across the services tagged on their card, so keep the tags honest. Blue is the performance book, orange is creative landing this month."
+            />
+            {services.map((row) => (
+              <BarRow
+                key={row.service}
+                label={`${row.service} · ${row.clients} client${row.clients === 1 ? "" : "s"}`}
+                value={row.total}
+                total={head.revenue}
+                tone={row.performance >= row.creative ? "var(--color-series-1)" : "var(--color-series-4)"}
+                right={fmtMoney(row.total, currency)}
+              />
+            ))}
+            <p className="mt-3 text-[11.5px] leading-relaxed text-[var(--color-ink-3)]">
+              {services
+                .slice(0, 3)
+                .map(
+                  (row) =>
+                    `${row.service}: ${fmtCompact(row.performance, currency)} performance · ${fmtCompact(row.creative, currency)} creative`,
+                )
+                .join("  ·  ")}
+            </p>
+          </Card>
+        )}
 
         {/* ---------------------------------------------------- projection */}
         <Card>
           <CardTitle
             title="Next six months, on today's contracts"
-            hint="No growth assumed and no renewals invented — a retainer stops on its end date, a project stops when it ships. The cliff shows up before it arrives."
+            hint="No growth assumed and no renewals invented — a retainer earns until its end date, a project lands once in its kickoff month, exactly as it will be invoiced. The cliff shows up before it arrives."
           />
           <ProfitBars
             points={forecast.map((month) => ({
@@ -337,8 +370,8 @@ export default async function FounderPage() {
               <thead>
                 <tr>
                   <Th>Month</Th>
-                  <Th align="right">Recurring</Th>
-                  <Th align="right">Projects</Th>
+                  <Th align="right">Performance</Th>
+                  <Th align="right">Creative</Th>
                   <Th align="right">Revenue</Th>
                   <Th align="right">Costs</Th>
                   <Th align="right">Profit</Th>
@@ -351,12 +384,12 @@ export default async function FounderPage() {
                     <Td>{month.label}</Td>
                     <Td align="right">
                       <span className="tabular text-[var(--color-ink-2)]">
-                        {fmtMoney(month.recurring, currency)}
+                        {fmtMoney(month.performance, currency)}
                       </span>
                     </Td>
                     <Td align="right">
                       <span className="tabular text-[var(--color-ink-2)]">
-                        {month.project > 0 ? fmtMoney(month.project, currency) : "—"}
+                        {month.creative > 0 ? fmtMoney(month.creative, currency) : "—"}
                       </span>
                     </Td>
                     <Td align="right">
@@ -402,14 +435,14 @@ export default async function FounderPage() {
           <div className="p-4 pb-0">
             <CardTitle
               title="Margin by client"
-              hint="Monthly revenue against what it costs to deliver, retainers and one-off projects on their own subtotals. A project is spread across the months it runs so it sits fairly next to a retainer."
+              hint="Each line of business on its own subtotal and in its own units: a retainer's monthly fee against its monthly cost to serve; a project's whole contract against its whole delivery cost across the months it runs."
             />
           </div>
           <TableWrap>
             <thead>
               <tr>
                 <Th>Client</Th>
-                <Th align="right">Revenue / month</Th>
+                <Th align="right">Revenue</Th>
                 <Th align="right">Cost to serve</Th>
                 <Th align="right">Gross profit</Th>
                 <Th align="right">Margin</Th>
@@ -448,7 +481,7 @@ export default async function FounderPage() {
                     </div>
                   </Td>
                   <Td align="right">
-                    <span className="tabular">{fmtMoney(client.mrr, currency)}</span>
+                    <span className="tabular">{fmtMoney(client.bookValue, currency)}</span>
                   </Td>
                   <Td align="right">
                     <span className="tabular text-[var(--color-ink-2)]">
@@ -496,7 +529,7 @@ export default async function FounderPage() {
                   </span>
                 </Td>
                 <Td align="right">
-                  <span className="tabular font-semibold">{fmtMoney(book.mrr, currency)}</span>
+                  <span className="tabular font-semibold">{fmtMoney(book.value, currency)}</span>
                 </Td>
                 <Td align="right">
                   <span className="tabular font-semibold text-[var(--color-ink-2)]">
@@ -505,18 +538,16 @@ export default async function FounderPage() {
                 </Td>
                 <Td align="right">
                   <span className="tabular font-semibold">
-                    {fmtMoney(book.mrr - book.deliveryCost, currency)}
+                    {fmtMoney(book.value - book.deliveryCost, currency)}
                   </span>
                 </Td>
                 <Td align="right">
                   <span className="tabular font-semibold">
-                    {book.mrr > 0 ? fmtPct(((book.mrr - book.deliveryCost) / book.mrr) * 100, 0) : "—"}
+                    {book.value > 0 ? fmtPct(((book.value - book.deliveryCost) / book.value) * 100, 0) : "—"}
                   </span>
                 </Td>
                 <Td align="right">
-                  <span className="tabular font-semibold text-[var(--color-ink-2)]">
-                    {head.mrr > 0 ? fmtPct((book.mrr / head.mrr) * 100, 0) : "—"}
-                  </span>
+                  <span className="tabular font-semibold text-[var(--color-ink-2)]" />
                 </Td>
                 <Td />
               </tr>
@@ -546,25 +577,27 @@ export default async function FounderPage() {
 
           <Card>
             <CardTitle
-              title="Revenue concentration"
+              title="Revenue concentration — this month"
               hint="How much of the month walks out the door with one phone call."
             />
-            {economics.map((client) => (
-              <BarRow
-                key={client.id}
-                label={client.name}
-                value={client.mrr}
-                total={economics.reduce((sum, c) => sum + c.mrr, 0)}
-                tone={
-                  client.shareOfRevenuePct >= 35
-                    ? "var(--color-critical)"
-                    : client.shareOfRevenuePct >= 25
-                      ? "var(--color-warning)"
-                      : "var(--color-series-1)"
-                }
-                right={fmtMoney(client.mrr, currency)}
-              />
-            ))}
+            {economics
+              .filter((client) => client.monthRevenue > 0)
+              .map((client) => (
+                <BarRow
+                  key={client.id}
+                  label={client.name}
+                  value={client.monthRevenue}
+                  total={head.revenue}
+                  tone={
+                    client.shareOfRevenuePct >= 35
+                      ? "var(--color-critical)"
+                      : client.shareOfRevenuePct >= 25
+                        ? "var(--color-warning)"
+                        : "var(--color-series-1)"
+                  }
+                  right={fmtMoney(client.monthRevenue, currency)}
+                />
+              ))}
           </Card>
         </div>
       </PageBody>

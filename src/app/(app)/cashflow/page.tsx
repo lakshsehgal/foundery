@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Crown, PiggyBank } from "lucide-react";
-import { requireFounder } from "@/lib/auth";
+import { requireFinance } from "@/lib/auth";
 import { billingHonesty, cashCalendar, collectionSpeed } from "@/lib/cashflow";
 import { defaultCurrency, fmtCompact, fmtMoney, symbolFor } from "@/lib/money";
 import { prettyDate, todayISO } from "@/lib/dates";
@@ -26,7 +26,7 @@ const INFLOW_STATUS = {
  * whether the line between them ever dips below zero.
  */
 export default async function CashflowPage() {
-  await requireFounder();
+  const role = await requireFinance();
   const today = todayISO();
   const currency = defaultCurrency();
 
@@ -85,17 +85,19 @@ export default async function CashflowPage() {
           />
         </div>
 
-        <Card>
-          <CardTitle
-            title="Cash position"
-            hint="Everything else on this page is derived — this is the one number only you know."
-          />
-          <CashPositionForm
-            balance={calendar.openingBalance}
-            salaryDay={calendar.salaryDay}
-            currencySymbol={symbolFor(currency)}
-          />
-        </Card>
+        {role === "founder" && (
+          <Card>
+            <CardTitle
+              title="Cash position"
+              hint="Everything else on this page is derived — this is the one number only you know."
+            />
+            <CashPositionForm
+              balance={calendar.openingBalance}
+              salaryDay={calendar.salaryDay}
+              currencySymbol={symbolFor(currency)}
+            />
+          </Card>
+        )}
 
         {/* ------------------------------------------------ ten-week line */}
         <Card padded={false}>

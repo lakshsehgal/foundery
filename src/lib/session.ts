@@ -8,7 +8,17 @@ import crypto from "node:crypto";
  * request, a router or a browser to run.
  */
 
-export type Role = "founder" | "operator";
+/**
+ * Three levels of trust. The founder sees everything; the founder's office
+ * runs the business view — analytics, cashflow, P&L, client values — but
+ * sees pay only as a combined figure, never per person; the operator runs
+ * the day-to-day with money hidden unless a settings switch opens it.
+ */
+export type Role = "founder" | "founders_office" | "operator";
+
+export function isRole(value: string): value is Role {
+  return value === "founder" || value === "founders_office" || value === "operator";
+}
 
 export const COOKIE_NAME = "foundery_session";
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12h
@@ -67,7 +77,7 @@ export function verifySession(token: string | undefined, now = Date.now()): Sess
   const payload = parts.length === 4 ? `${role}.${email64}.${expiry}` : `${role}.${expiry}`;
   if (!safeEqual(sign(payload), mac)) return null;
   if (!/^\d+$/.test(expiry) || Number(expiry) < now) return null;
-  if (role !== "founder" && role !== "operator") return null;
+  if (!isRole(role)) return null;
 
   let email: string | null = null;
   if (email64) {
@@ -85,11 +95,13 @@ export function verifyToken(token: string | undefined, now = Date.now()): Role |
   return verifySession(token, now)?.role ?? null;
 }
 
-/** Which passcode, if any, matches. Founder is checked first. */
+/** Which passcode, if any, matches. Checked in order of privilege. */
 export function roleForPasscode(passcode: string): Role | null {
   const founder = process.env.FOUNDERY_FOUNDER_PASSCODE || "";
+  const office = process.env.FOUNDERY_FOUNDERS_OFFICE_PASSCODE || "";
   const operator = process.env.FOUNDERY_OPERATOR_PASSCODE || "";
   if (founder && safeEqual(passcode, founder)) return "founder";
+  if (office && safeEqual(passcode, office)) return "founders_office";
   if (operator && safeEqual(passcode, operator)) return "operator";
   return null;
 }

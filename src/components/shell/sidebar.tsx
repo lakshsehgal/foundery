@@ -15,7 +15,8 @@ type Item = {
   href: string;
   label: string;
   icon: React.ComponentType<{ size?: number }>;
-  founderOnly?: boolean;
+  /** "finance" = founder + founder's office; "founder" = the founder alone. */
+  access?: "finance" | "founder";
 };
 
 const ITEMS: Item[] = [
@@ -26,11 +27,17 @@ const ITEMS: Item[] = [
   { href: "/onboarding", label: "Onboarding", icon: FileText },
   { href: "/content", label: "Content", icon: Clapperboard },
   { href: "/hiring", label: "Hiring", icon: UserRoundPlus },
-  { href: "/founder", label: "Founder dashboard", icon: LineChart, founderOnly: true },
-  { href: "/cashflow", label: "Cashflow", icon: Banknote, founderOnly: true },
-  { href: "/pnl", label: "Profit & P&L", icon: BadgeIndianRupee, founderOnly: true },
-  { href: "/settings", label: "Settings", icon: Settings, founderOnly: true },
+  { href: "/founder", label: "Founder dashboard", icon: LineChart, access: "finance" },
+  { href: "/cashflow", label: "Cashflow", icon: Banknote, access: "finance" },
+  { href: "/pnl", label: "Profit & P&L", icon: BadgeIndianRupee, access: "finance" },
+  { href: "/settings", label: "Settings", icon: Settings, access: "founder" },
 ];
+
+const ROLE_LINE: Record<Role, string> = {
+  founder: "Founder · sees everything",
+  founders_office: "Founder's office · combined money view",
+  operator: "Operator · day-to-day view",
+};
 
 /**
  * Theme and rail width live in the browser — on `<html data-theme>` and in
@@ -95,7 +102,11 @@ export function Sidebar({ role, email }: { role: Role; email: string | null }) {
     writePref("foundery-rail", readPref("foundery-rail", "1") ? "0" : "1");
   }, []);
 
-  const visible = ITEMS.filter((item) => !item.founderOnly || role === "founder");
+  const visible = ITEMS.filter(
+    (item) =>
+      !item.access ||
+      (item.access === "finance" ? role === "founder" || role === "founders_office" : role === "founder"),
+  );
 
   // Below `lg` the rail is always narrow: 224px of a 390px screen is most of
   // the phone. The manual toggle only has anything to do on a wide screen, so
@@ -144,10 +155,10 @@ export function Sidebar({ role, email }: { role: Role; email: string | null }) {
               >
                 <Icon size={16} />
                 <span className={`min-w-0 truncate ${label}`}>{item.label}</span>
-                {item.founderOnly && (
+                {item.access && (
                   <Lock
                     size={11}
-                    aria-label="Founder only"
+                    aria-label={item.access === "founder" ? "Founder only" : "Finance view"}
                     className={`ml-auto shrink-0 opacity-45 ${label}`}
                   />
                 )}
@@ -176,9 +187,7 @@ export function Sidebar({ role, email }: { role: Role; email: string | null }) {
           </span>
           <div className="min-w-0">
             <p className="truncate text-[12px] font-medium">{email ?? "Passcode session"}</p>
-            <p className="truncate text-[10.5px] capitalize text-[var(--color-ink-3)]">
-              {role} · {role === "founder" ? "sees everything" : "day-to-day view"}
-            </p>
+            <p className="truncate text-[10.5px] text-[var(--color-ink-3)]">{ROLE_LINE[role]}</p>
           </div>
         </div>
 

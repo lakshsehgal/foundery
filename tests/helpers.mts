@@ -19,6 +19,7 @@ export function setupTempDb(name: string): string {
   process.env.FOUNDERY_CURRENCY = "INR";
   process.env.FOUNDERY_SESSION_SECRET = "test-secret";
   process.env.FOUNDERY_FOUNDER_PASSCODE = "founder-pass";
+  process.env.FOUNDERY_FOUNDERS_OFFICE_PASSCODE = "office-pass";
   process.env.FOUNDERY_OPERATOR_PASSCODE = "operator-pass";
   return dir;
 }

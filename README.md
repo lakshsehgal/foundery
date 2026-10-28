@@ -29,6 +29,7 @@ nobody can read the passcodes back out of the running app:
 | Variable | What it does |
 |---|---|
 | `FOUNDERY_FOUNDER_PASSCODE` | Signs you in as the founder. Sees everything. |
+| `FOUNDERY_FOUNDERS_OFFICE_PASSCODE` | Signs you in as the founder's office: analytics, cashflow and P&L with salaries shown only as a combined figure. |
 | `FOUNDERY_OPERATOR_PASSCODE` | Signs you in as the operator. The day-to-day view. |
 | `FOUNDERY_SESSION_SECRET` | Signs session cookies. Change it and everyone is signed out. |
 | `DATABASE_URL` | Supabase connection string. Empty = local PGlite. |

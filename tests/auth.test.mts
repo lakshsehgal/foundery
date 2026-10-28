@@ -13,6 +13,7 @@ const {
 describe("passcodes", () => {
   test("each passcode maps to its own role", () => {
     assert.equal(roleForPasscode("founder-pass"), "founder");
+    assert.equal(roleForPasscode("office-pass"), "founders_office");
     assert.equal(roleForPasscode("operator-pass"), "operator");
   });
 
@@ -31,6 +32,7 @@ describe("passcodes", () => {
 describe("session tokens", () => {
   test("a freshly issued token verifies to its role", () => {
     assert.equal(verifyToken(issueToken("founder")), "founder");
+    assert.equal(verifyToken(issueToken("founders_office")), "founders_office");
     assert.equal(verifyToken(issueToken("operator")), "operator");
   });
 
@@ -122,12 +124,15 @@ describe("email allowlists", () => {
     assert.equal(roleForEmail("stranger@example.com"), null);
 
     process.env.FOUNDERY_FOUNDER_EMAILS = "boss@x.com";
+    process.env.FOUNDERY_FOUNDERS_OFFICE_EMAILS = "assoc@x.com";
     process.env.FOUNDERY_OPERATOR_EMAILS = "ops@x.com, second@x.com";
     assert.equal(roleForEmail("boss@x.com"), "founder");
+    assert.equal(roleForEmail("assoc@x.com"), "founders_office");
     assert.equal(roleForEmail("ops@x.com"), "operator");
     assert.equal(roleForEmail("second@x.com"), "operator");
     assert.equal(roleForEmail("laksh@neuroidmedia.com"), null, "explicit list replaces the default");
     delete process.env.FOUNDERY_FOUNDER_EMAILS;
+    delete process.env.FOUNDERY_FOUNDERS_OFFICE_EMAILS;
     delete process.env.FOUNDERY_OPERATOR_EMAILS;
   });
 });
@@ -173,6 +178,11 @@ describe("team table roles", () => {
       `INSERT INTO foundery.team_members (email, role) VALUES ('newops@x.com', 'operator')`,
     );
     assert.equal(await teamRoleForEmail("NewOps@X.com"), "operator", "db row, case-insensitive");
+    await db.query(
+      `INSERT INTO foundery.team_members (email, role) VALUES ('assoc@x.com', 'founders_office')`,
+    );
+    assert.equal(await teamRoleForEmail("assoc@x.com"), "founders_office", "office role from the table");
+    await db.query(`DELETE FROM foundery.team_members WHERE email = 'assoc@x.com'`);
     assert.equal(await teamRoleForEmail("laksh@neuroidmedia.com"), "founder", "default still works");
 
     await db.query(`DELETE FROM foundery.team_members WHERE email = 'newops@x.com'`);

@@ -25,13 +25,13 @@ const ENGAGEMENT_OPTIONS: {
   {
     key: "retainer",
     label: "Monthly retainer",
-    line: "Bills every month until someone ends it.",
+    line: "Performance marketing — bills every month until someone ends it.",
     icon: Repeat,
   },
   {
     key: "one_time",
     label: "One-off project",
-    line: "A fixed price, delivered and done.",
+    line: "Creative — a fixed price, invoiced when it kicks off.",
     icon: CalendarRange,
   },
 ];
@@ -267,7 +267,7 @@ export function ClientEditor({
                 <Field
                   label={`Retainer / month (${currencySymbol})`}
                   htmlFor="retainer_amount"
-                  hint="The monthly fee. Counts as recurring revenue everywhere."
+                  hint="The monthly fee. Counts as performance revenue, every month between the dates."
                 >
                   <TextInput
                     id="retainer_amount"
@@ -284,7 +284,7 @@ export function ClientEditor({
                 <Field
                   label={`Project value — total (${currencySymbol})`}
                   htmlFor="one_time_value"
-                  hint="The whole contract. Analytics spread it evenly across the project's months."
+                  hint="The whole contract. Counts as creative revenue in the month the project kicks off — the month its invoice goes out."
                 >
                   <TextInput
                     id="one_time_value"
@@ -327,7 +327,7 @@ export function ClientEditor({
             hint={
               retainer
                 ? "Leave empty if open-ended."
-                : "Set both dates — the value is spread across these months. Without them we assume three."
+                : "Set both dates — the monthly cost to serve runs across these months. Without them we assume one."
             }
           >
             <TextInput id="end_date" name="end_date" type="date" defaultValue={client?.end_date ?? ""} />

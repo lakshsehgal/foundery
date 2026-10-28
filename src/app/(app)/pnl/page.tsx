@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { requireFounder } from "@/lib/auth";
+import { requireFinance } from "@/lib/auth";
 import { pnl, pnlTotals } from "@/lib/analytics";
 import { defaultCurrency, fmtMoney, fmtPct, symbolFor } from "@/lib/money";
 import { monthKey } from "@/lib/dates";
@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "Profit & P&L" };
 export const dynamic = "force-dynamic";
 
 export default async function PnlPage() {
-  await requireFounder();
+  await requireFinance();
 
   const currency = defaultCurrency();
   const symbol = symbolFor(currency);
@@ -83,7 +83,7 @@ export default async function PnlPage() {
           <div className="p-4 pb-0">
             <CardTitle
               title="The statement"
-              hint="Revenue from the contracted book — retainers plus project slices, month by month — costs from the cost base as it stood, plus anything you added by hand. Actual billing lives in Zoho."
+              hint="Revenue from the contracted book — retainers month by month, one-off projects in full in their kickoff month, exactly as invoiced — costs from the cost base as it stood, plus anything you added by hand. Actual billing lives in Zoho."
             />
           </div>
           <TableWrap>

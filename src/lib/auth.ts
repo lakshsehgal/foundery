@@ -33,10 +33,21 @@ export async function requireRole(): Promise<Role> {
   return role;
 }
 
-/** Require the founder role; operators get a clear "not for you" screen. */
+/** Require the founder role; everyone else gets a clear "not for you" screen. */
 export async function requireFounder(): Promise<Role> {
   const role = await requireRole();
   if (role !== "founder") redirect("/denied");
+  return role;
+}
+
+/**
+ * The money view: founder or founder's office. The pages behind this show
+ * analytics, cashflow and the P&L — all combined figures; per-person pay is
+ * kept out by the policy layer, not by this gate.
+ */
+export async function requireFinance(): Promise<Role> {
+  const role = await requireRole();
+  if (role !== "founder" && role !== "founders_office") redirect("/denied");
   return role;
 }
 

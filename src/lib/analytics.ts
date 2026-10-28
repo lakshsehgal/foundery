@@ -4,7 +4,9 @@ import { billingTasks, costsForMonth, costTotals, monthlyBurn } from "./queries"
 import { defaultCurrency, fmtCompact } from "./money";
 import { lastMonths, monthKey, monthLabel, todayISO } from "./dates";
 import type { CostCategory, Health } from "./taxonomy";
-import { marginPct, spreadProject } from "./economics";
+import {
+  isCreative, marginPct, projectMarginPct, projectMonths, revenueInMonth, type Contract,
+} from "./economics";
 
 /**
  * Founder-only maths. Nothing here is called from an operator screen — the
@@ -20,18 +22,22 @@ export type ClientEconomics = {
   vip: boolean;
   engagement: string;
   health: Health;
-  /** When the contract ends — the project-cliff maths reads this. */
+  /** When the contract ends — the forecast reads this. */
   endDate: string | null;
-  /** Monthly recognised revenue. A project is spread over its live months. */
-  mrr: number;
+  /** This month's contracted revenue: a retainer's fee, or a project landing now. */
+  monthRevenue: number;
+  /** The margin-table number: monthly fee for a retainer, whole contract for a project. */
+  bookValue: number;
+  /** Against bookValue: monthly for a retainer, the whole delivery cost for a project. */
   deliveryCost: number;
   grossProfit: number;
   /** null rather than a confident 0 when there is no revenue to divide by. */
   marginPct: number | null;
+  /** Share of this month's total contracted revenue. */
   shareOfRevenuePct: number;
 };
 
-export async function clientEconomics(): Promise<ClientEconomics[]> {
+export async function clientEconomics(month = monthKey()): Promise<ClientEconomics[]> {
   const db = await getDb();
   const rows = await db.query<{
     id: number; name: string; vip: boolean; engagement: string; health: string;
@@ -44,11 +50,11 @@ export async function clientEconomics(): Promise<ClientEconomics[]> {
   );
 
   const priced = rows.map((row) => {
-    const mrr =
-      row.engagement === "retainer"
-        ? row.retainer_amount
-        : spreadProject(row.one_time_value, row.start_date, row.end_date);
-    const grossProfit = mrr - row.delivery_cost;
+    const creative = isCreative(row);
+    const bookValue = creative ? row.one_time_value : row.retainer_amount;
+    const deliveryCost = creative
+      ? row.delivery_cost * projectMonths(row.start_date, row.end_date)
+      : row.delivery_cost;
     return {
       id: row.id,
       name: row.name,
@@ -56,29 +62,33 @@ export async function clientEconomics(): Promise<ClientEconomics[]> {
       engagement: row.engagement,
       health: row.health as Health,
       endDate: row.end_date,
-      mrr,
-      deliveryCost: row.delivery_cost,
-      grossProfit,
-      marginPct: marginPct(mrr, row.delivery_cost),
+      monthRevenue: revenueInMonth(row, month, month),
+      bookValue,
+      deliveryCost,
+      grossProfit: bookValue - deliveryCost,
+      marginPct: creative
+        ? projectMarginPct(row.one_time_value, row.delivery_cost, row.start_date, row.end_date)
+        : marginPct(row.retainer_amount, row.delivery_cost),
       shareOfRevenuePct: 0,
     };
   });
 
-  const total = priced.reduce((sum, c) => sum + c.mrr, 0);
+  const total = priced.reduce((sum, c) => sum + c.monthRevenue, 0);
   for (const client of priced) {
-    client.shareOfRevenuePct = total > 0 ? (client.mrr / total) * 100 : 0;
+    client.shareOfRevenuePct = total > 0 ? (client.monthRevenue / total) * 100 : 0;
   }
-  return priced.sort((a, b) => b.mrr - a.mrr);
+  return priced.sort((a, b) => b.monthRevenue - a.monthRevenue || b.bookValue - a.bookValue);
 }
 
 /* --------------------------------------------------------------- headline */
 
 export type Headline = {
-  mrr: number;
-  /** The part of mrr that renews by itself: retainers only. */
-  recurring: number;
-  /** The part that stops when the work ships: one-off projects, spread monthly. */
-  project: number;
+  /** This month's contracted revenue: performance + creative landing now. */
+  revenue: number;
+  /** The performance-marketing book: retainers earning this month. */
+  performance: number;
+  /** Creative one-offs landing this month. */
+  creative: number;
   retainerClients: number;
   projectClients: number;
   burn: number;
@@ -99,23 +109,28 @@ export async function headline(): Promise<Headline> {
     monthlyBurn(),
     getSetting("cash_buffer", ""),
   ]);
-  const mrr = economics.reduce((sum, c) => sum + c.mrr, 0);
+  const revenue = economics.reduce((sum, c) => sum + c.monthRevenue, 0);
   const retainers = economics.filter((c) => c.engagement === "retainer");
-  const recurring = retainers.reduce((sum, c) => sum + c.mrr, 0);
-  const deliveryCost = economics.reduce((sum, c) => sum + c.deliveryCost, 0);
-  const netProfit = mrr - burn;
+  const performance = retainers.reduce((sum, c) => sum + c.monthRevenue, 0);
+  // Delivery cost against this month's revenue: monthly for retainers, the
+  // whole delivery cost for a project landing now (whole revenue, whole cost).
+  const deliveryCost = economics.reduce(
+    (sum, c) => sum + (c.monthRevenue > 0 ? c.deliveryCost : 0),
+    0,
+  );
+  const netProfit = revenue - burn;
   const cashBuffer = bufferRaw === "" ? null : Number(bufferRaw);
 
   return {
-    mrr,
-    recurring,
-    project: mrr - recurring,
+    revenue,
+    performance,
+    creative: revenue - performance,
     retainerClients: retainers.length,
     projectClients: economics.length - retainers.length,
     burn,
-    grossProfit: mrr - deliveryCost,
+    grossProfit: revenue - deliveryCost,
     netProfit,
-    netMarginPct: mrr > 0 ? (netProfit / mrr) * 100 : null,
+    netMarginPct: revenue > 0 ? (netProfit / revenue) * 100 : null,
     deliveryCost,
     activeClients: economics.length,
     vipClients: economics.filter((c) => c.vip).length,
@@ -156,11 +171,11 @@ export function efficiency(
   return {
     headcount,
     payroll,
-    revenuePerHead: headcount > 0 ? head.mrr / headcount : null,
+    revenuePerHead: headcount > 0 ? head.revenue / headcount : null,
     profitPerHead: headcount > 0 ? head.netProfit / headcount : null,
-    payrollSharePct: head.mrr > 0 ? (payroll / head.mrr) * 100 : null,
-    deliverySharePct: head.mrr > 0 ? (head.deliveryCost / head.mrr) * 100 : null,
-    avgClientValue: head.activeClients > 0 ? head.mrr / head.activeClients : null,
+    payrollSharePct: head.revenue > 0 ? (payroll / head.revenue) * 100 : null,
+    deliverySharePct: head.revenue > 0 ? (head.deliveryCost / head.revenue) * 100 : null,
+    avgClientValue: head.activeClients > 0 ? head.revenue / head.activeClients : null,
   };
 }
 
@@ -236,10 +251,10 @@ export type ProjectedMonth = {
   month: string;
   label: string;
   revenue: number;
-  /** Retainer revenue in the month — the part that renews by itself. */
-  recurring: number;
-  /** One-off project revenue in the month — the part that ends. */
-  project: number;
+  /** Retainer revenue in the month — performance marketing, renews by itself. */
+  performance: number;
+  /** Creative one-offs landing in the month: already-signed projects kicking off then. */
+  creative: number;
   costs: number;
   profit: number;
   /** Confidence shrinks the further out we look. */
@@ -248,51 +263,96 @@ export type ProjectedMonth = {
 
 /**
  * Forward revenue from contracts that already exist — no growth assumption
- * baked in. A retainer counts until its end date; a project stops when it
- * ships. Anything past a client's end date simply isn't there, which is the
- * point: the shape of the curve shows the cliff before it arrives.
+ * baked in. A retainer counts in every month between its dates; a project's
+ * whole value lands in its kickoff month, exactly as it will be invoiced.
+ * Anything past a client's end date simply isn't there, which is the point:
+ * the shape of the curve shows the cliff before it arrives.
  */
 export async function projection(months = 6): Promise<ProjectedMonth[]> {
   const db = await getDb();
-  const rows = await db.query<{
-    engagement: string; retainer_amount: number; one_time_value: number;
-    start_date: string | null; end_date: string | null;
-  }>(
+  const rows = await db.query<Contract>(
     `SELECT engagement, retainer_amount, one_time_value, start_date, end_date
      FROM foundery.clients WHERE status IN ('active','paused')`,
   );
 
   const burn = await monthlyBurn();
   const start = new Date();
+  const currentKey = monthKey(start);
   const out: ProjectedMonth[] = [];
 
   for (let i = 0; i < months; i++) {
     const date = new Date(start.getFullYear(), start.getMonth() + i, 1);
     const key = monthKey(date);
-    let recurring = 0;
-    let project = 0;
+    let performance = 0;
+    let creative = 0;
     for (const row of rows) {
-      if (row.end_date && row.end_date.slice(0, 7) < key) continue;
-      if (row.start_date && row.start_date.slice(0, 7) > key) continue;
-      if (row.engagement === "retainer") {
-        recurring += row.retainer_amount;
-      } else {
-        project += spreadProject(row.one_time_value, row.start_date, row.end_date);
-      }
+      // An undated project can only be counted somewhere once: the current month.
+      const value = revenueInMonth(row, key, key === currentKey ? currentKey : null);
+      if (isCreative(row)) creative += value;
+      else performance += value;
     }
-    const revenue = recurring + project;
+    const revenue = performance + creative;
     out.push({
       month: key,
       label: monthLabel(key),
       revenue,
-      recurring,
-      project,
+      performance,
+      creative,
       costs: burn,
       profit: revenue - burn,
       confidence: i === 0 ? "booked" : i <= 2 ? "likely" : "assumed",
     });
   }
   return out;
+}
+
+/* ------------------------------------------------------ revenue by service */
+
+export type ServiceRevenue = {
+  service: string;
+  /** From retainers — the performance-marketing book. */
+  performance: number;
+  /** From one-off projects landing this month — the creative book. */
+  creative: number;
+  total: number;
+  clients: number;
+};
+
+/**
+ * Where this month's revenue actually comes from, by the services tagged on
+ * each client. A client with three services splits its revenue evenly across
+ * them — the tags don't carry their own prices, so an even split is the
+ * honest allocation rather than an invented one.
+ */
+export async function serviceRevenue(month = monthKey()): Promise<ServiceRevenue[]> {
+  const db = await getDb();
+  const rows = await db.query<Contract & { services: unknown }>(
+    `SELECT engagement, retainer_amount, one_time_value, start_date, end_date, services
+     FROM foundery.clients WHERE status = 'active'`,
+  );
+
+  const buckets = new Map<string, ServiceRevenue>();
+  for (const row of rows) {
+    const revenue = revenueInMonth(row, month, month);
+    const services = Array.isArray(row.services) && row.services.length > 0
+      ? (row.services as string[])
+      : ["No service tagged"];
+    const slice = revenue / services.length;
+    for (const service of services) {
+      const bucket =
+        buckets.get(service) ??
+        { service, performance: 0, creative: 0, total: 0, clients: 0 };
+      bucket.clients += 1;
+      if (isCreative(row)) bucket.creative += slice;
+      else bucket.performance += slice;
+      bucket.total += slice;
+      buckets.set(service, bucket);
+    }
+  }
+
+  return [...buckets.values()]
+    .filter((bucket) => bucket.total > 0)
+    .sort((a, b) => b.total - a.total);
 }
 
 /* ------------------------------------------------------------------- risk */
@@ -327,11 +387,11 @@ const SEVERITY_WEIGHT = { good: 0, warning: 8, serious: 18, critical: 30 };
 export async function riskReport(today = todayISO()): Promise<RiskReport> {
   const findings: RiskFinding[] = [];
   const economics = await clientEconomics();
-  const totalMrr = economics.reduce((sum, c) => sum + c.mrr, 0);
+  const totalRevenue = economics.reduce((sum, c) => sum + c.monthRevenue, 0);
 
   // 1 — Revenue concentration.
   const top = economics[0];
-  if (!top || totalMrr <= 0) {
+  if (!top || totalRevenue <= 0) {
     findings.push({
       key: "concentration",
       title: "No active revenue recorded",
@@ -341,11 +401,11 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
       action: "Add your active clients and their retainer values.",
     });
   } else {
-    const share = (top.mrr / totalMrr) * 100;
+    const share = (top.monthRevenue / totalRevenue) * 100;
     const severity = share >= 50 ? "critical" : share >= 35 ? "serious" : share >= 25 ? "warning" : "good";
     findings.push({
       key: "concentration",
-      title: `${top.name} is ${share.toFixed(0)}% of monthly revenue`,
+      title: `${top.name} is ${share.toFixed(0)}% of this month's revenue`,
       detail:
         severity === "good"
           ? "No single client dominates the book."
@@ -449,8 +509,8 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
 
   // 5 — Accounts flagged as wobbling.
   const atRisk = economics.filter((c) => c.health === "red" || c.health === "amber");
-  const atRiskMrr = atRisk.reduce((sum, c) => sum + c.mrr, 0);
-  const atRiskShare = totalMrr > 0 ? (atRiskMrr / totalMrr) * 100 : 0;
+  const atRiskRevenue = atRisk.reduce((sum, c) => sum + c.monthRevenue, 0);
+  const atRiskShare = totalRevenue > 0 ? (atRiskRevenue / totalRevenue) * 100 : 0;
   const healthSeverity =
     atRiskShare >= 40 ? "critical" : atRiskShare >= 20 ? "serious" : atRiskShare > 0 ? "warning" : "good";
   findings.push({
@@ -468,45 +528,46 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
     action: atRisk.length === 0 ? "Nothing to do." : "Book the calls this week, not next.",
   });
 
-  // 6 — Revenue mix. A retainer renews by itself; a project has to be re-sold.
-  // Two signals share the finding: how much of the book is one-off work, and
-  // how much of that one-off revenue disappears inside the next 60 days.
+  // 6 — Revenue mix and the month ahead. Performance retainers start next
+  // month on their own; creative one-offs land once and have to be re-sold.
+  // Two signals share the finding: how much of this month is creative, and
+  // whether next month's contracted book already falls short of this one.
   const projects = economics.filter((c) => c.engagement !== "retainer");
-  const projectMrr = projects.reduce((sum, c) => sum + c.mrr, 0);
-  const projectShare = totalMrr > 0 ? (projectMrr / totalMrr) * 100 : 0;
-  const horizon = new Date(today);
-  horizon.setDate(horizon.getDate() + 60);
-  const horizonISO = horizon.toISOString().slice(0, 10);
-  const endingSoon = projects.filter((c) => c.endDate !== null && c.endDate <= horizonISO);
-  const endingSoonMrr = endingSoon.reduce((sum, c) => sum + c.mrr, 0);
-  const cliffShare = totalMrr > 0 ? (endingSoonMrr / totalMrr) * 100 : 0;
+  const creativeRevenue = projects.reduce((sum, c) => sum + c.monthRevenue, 0);
+  const creativeShare = totalRevenue > 0 ? (creativeRevenue / totalRevenue) * 100 : 0;
+  const ahead = await projection(2);
+  const nextMonth = ahead[1];
+  const dropPct =
+    totalRevenue > 0 && nextMonth
+      ? ((totalRevenue - nextMonth.revenue) / totalRevenue) * 100
+      : 0;
 
   const mixSeverity =
-    cliffShare >= 25 || projectShare >= 60
+    dropPct >= 35 || creativeShare >= 60
       ? "serious"
-      : cliffShare >= 10 || projectShare >= 40
+      : dropPct >= 15 || creativeShare >= 40
         ? "warning"
         : "good";
   findings.push({
     key: "revenue_mix",
     title:
-      projectMrr <= 0
-        ? "All revenue is recurring"
-        : `${projectShare.toFixed(0)}% of revenue is one-off project work`,
+      creativeRevenue <= 0
+        ? "All of this month's revenue is performance retainers"
+        : `${creativeShare.toFixed(0)}% of this month's revenue is one-off creative work`,
     detail:
-      projectMrr <= 0
-        ? "Every active account is on a retainer — next month starts where this one ended."
-        : endingSoon.length > 0
-          ? `${endingSoon.map((c) => c.name).join(", ")} ship${endingSoon.length === 1 ? "s" : ""} within 60 days — ${cliffShare.toFixed(0)}% of revenue with nothing behind it yet.`
-          : "Project work is fine money, but every rupee of it has to be re-sold when it ships.",
+      dropPct >= 15 && nextMonth
+        ? `Next month is contracted at ${fmtCompact(nextMonth.revenue, defaultCurrency())} — ${dropPct.toFixed(0)}% below this month. That gap is what has to be sold.`
+        : creativeRevenue <= 0
+          ? "Every active account is a retainer — next month starts where this one ended."
+          : "Creative money lands once; the performance book is what next month starts with.",
     severity: mixSeverity,
-    metric: projectMrr <= 0 ? "0%" : `${projectShare.toFixed(0)}%`,
+    metric: creativeRevenue <= 0 ? "0%" : `${creativeShare.toFixed(0)}%`,
     action:
       mixSeverity === "good"
         ? "Nothing to do."
-        : endingSoon.length > 0
-          ? "Pitch the retainer conversion before the project wraps, not after."
-          : "Convert the best project clients to retainers, or keep the pipeline two projects deep.",
+        : dropPct >= 15
+          ? "Fill next month now: convert a creative client to a performance retainer, or close the next project before this one wraps."
+          : "Convert the best creative clients to retainers, or keep the pipeline two projects deep.",
   });
 
   const score = Math.min(
@@ -525,7 +586,8 @@ export async function riskReport(today = todayISO()): Promise<RiskReport> {
 export type PnlMonth = {
   month: string;
   label: string;
-  /** Contracted revenue in the month: retainers plus spread project slices. */
+  /** Contracted revenue in the month: retainers live in it, plus one-off
+   *  projects kicking off in it — the same rule the invoices follow. */
   contracted: number;
   otherIncome: number;
   costs: number;
@@ -545,10 +607,11 @@ export type PnlMonth = {
 
 /**
  * With invoicing in Zoho, the P&L reads revenue off the book itself: each
- * month gets every retainer live in it plus each project's monthly slice,
- * bounded by the contract's dates. Churned clients still count inside their
- * dates — the month they earned in doesn't un-happen — but a churned client
- * with no end date recorded is skipped rather than counted forever.
+ * month gets every retainer live in it, plus the whole value of every one-off
+ * project that kicked off in it — the month its invoice went out. Churned
+ * clients still count inside their dates — the month they earned in doesn't
+ * un-happen — but a churned retainer with no end date is skipped rather than
+ * counted forever, and an undated project counts in the current month only.
  */
 export async function pnl(months = 12, endKey?: string): Promise<PnlMonth[]> {
   const keys = endKey ? lastMonths(months, endKey) : lastMonths(months);
@@ -575,17 +638,19 @@ export async function pnl(months = 12, endKey?: string): Promise<PnlMonth[]> {
   return keys.map((month, index) => {
     let contracted = 0;
     for (const row of contracts) {
-      if (row.status === "churned" && !row.end_date) continue;
-      if (row.end_date && row.end_date.slice(0, 7) < month) continue;
-      if (row.start_date && row.start_date.slice(0, 7) > month) continue;
       if (row.engagement === "retainer") {
-        contracted += row.retainer_amount;
-      } else if (row.start_date || row.end_date) {
-        contracted += spreadProject(row.one_time_value, row.start_date, row.end_date);
-      } else if (month === currentKey) {
-        // An undated project can't be placed historically — count its monthly
-        // slice in the current month only rather than in every month forever.
-        contracted += spreadProject(row.one_time_value, null, null);
+        // A churned retainer with no recorded end can't be bounded — skip it
+        // rather than count it forever.
+        if (row.status === "churned" && !row.end_date) continue;
+        contracted += revenueInMonth(row, month);
+      } else {
+        // A project lands in its kickoff month whatever its status today —
+        // the month it was invoiced in doesn't un-happen. Undated projects
+        // can't be placed historically, so they count in the current month
+        // only, and not at all once churned.
+        const undatedMonth =
+          month === currentKey && row.status !== "churned" ? currentKey : null;
+        contracted += revenueInMonth(row, month, undatedMonth);
       }
     }
 

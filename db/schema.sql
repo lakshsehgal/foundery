@@ -185,7 +185,7 @@ alter table foundery.clients add column if not exists
 create table if not exists foundery.team_members (
   id       bigint generated always as identity primary key,
   email    text not null unique,
-  role     text not null default 'operator',   -- founder | operator
+  role     text not null default 'operator',   -- founder | founders_office | operator
   added_by text,
   added_at timestamptz not null default now()
 );
@@ -270,7 +270,7 @@ create index if not exists idx_applicants_role on foundery.job_applicants(role_i
 create table if not exists foundery.audit_log (
   id        bigint generated always as identity primary key,
   ts        timestamptz not null default now(),
-  actor     text not null,            -- founder | operator | public
+  actor     text not null,            -- founder | founders_office | operator | public
   action    text not null,
   entity    text,
   entity_id text,

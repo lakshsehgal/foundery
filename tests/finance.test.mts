@@ -8,9 +8,8 @@ const { getDb } = await import("../src/lib/db");
 const { costsForMonth, monthlyBurn } = await import("../src/lib/queries");
 const { pnl, pnlTotals, riskReport, projection, clientEconomics } = await import("../src/lib/analytics");
 const { fmtPct, fmtCompact, monthlyEquivalent } = await import("../src/lib/money");
-const { spreadProject, marginPct, revenueSplit, monthlyRevenue } = await import(
-  "../src/lib/economics"
-);
+const { revenueInMonth, revenueSplit, marginPct, projectMarginPct, projectMonths, landingMonth } =
+  await import("../src/lib/economics");
 const { billingDateFor, daysUntil, lastMonths } = await import("../src/lib/dates");
 
 const db = await getDb();
@@ -58,13 +57,46 @@ describe("money", () => {
 });
 
 describe("contracts", () => {
-  test("a dated project spreads evenly across the months it runs, inclusive", () => {
-    assert.equal(spreadProject(300000, "2026-07-01", "2026-09-30"), 100000);
-    assert.equal(spreadProject(300000, "2026-07-01", "2026-07-31"), 300000);
+  const retainer = {
+    engagement: "retainer",
+    retainer_amount: 80000,
+    one_time_value: 0,
+    start_date: "2026-03-01",
+    end_date: "2026-10-31",
+  };
+  const project = {
+    engagement: "one_time",
+    retainer_amount: 0,
+    one_time_value: 300000,
+    start_date: "2026-07-01",
+    end_date: "2026-09-30",
+  };
+
+  test("a retainer earns its fee in every month between its dates, and nothing outside them", () => {
+    assert.equal(revenueInMonth(retainer, "2026-02"), 0, "before it starts");
+    assert.equal(revenueInMonth(retainer, "2026-03"), 80000);
+    assert.equal(revenueInMonth(retainer, "2026-10"), 80000);
+    assert.equal(revenueInMonth(retainer, "2026-11"), 0, "after it ends");
   });
 
-  test("an undated project falls back to a three-month spread, not a spike", () => {
-    assert.equal(spreadProject(300000, null, null), 100000);
+  test("a project's whole value lands in its kickoff month — the month it is invoiced", () => {
+    assert.equal(landingMonth(project), "2026-07");
+    assert.equal(revenueInMonth(project, "2026-07"), 300000);
+    assert.equal(revenueInMonth(project, "2026-08"), 0, "no phantom spread into later months");
+    assert.equal(revenueInMonth(project, "2026-06"), 0);
+  });
+
+  test("an undated project counts only where the caller places it", () => {
+    const undated = { ...project, start_date: null, end_date: null };
+    assert.equal(revenueInMonth(undated, "2026-08"), 0, "skipped without a fallback month");
+    assert.equal(revenueInMonth(undated, "2026-08", "2026-08"), 300000, "counted in the given month");
+    assert.equal(revenueInMonth(undated, "2026-07", "2026-08"), 0);
+  });
+
+  test("project months are inclusive, with one month assumed when undated", () => {
+    assert.equal(projectMonths("2026-07-01", "2026-09-30"), 3);
+    assert.equal(projectMonths("2026-07-01", "2026-07-31"), 1);
+    assert.equal(projectMonths(null, null), 1);
   });
 
   test("margin is null rather than zero when there is no revenue to divide by", () => {
@@ -72,28 +104,18 @@ describe("contracts", () => {
     assert.equal(marginPct(100000, 40000), 60);
   });
 
-  test("a retainer is all recurring, a project is all one-off, and the halves sum to the total", () => {
-    const retainer = {
-      engagement: "retainer",
-      retainer_amount: 80000,
-      one_time_value: 0,
-      start_date: null,
-      end_date: null,
-    };
-    const project = {
-      engagement: "one_time",
-      retainer_amount: 0,
-      one_time_value: 300000,
-      start_date: "2026-07-01",
-      end_date: "2026-09-30",
-    };
-    assert.deepEqual(revenueSplit(retainer), { recurring: 80000, project: 0 });
-    assert.deepEqual(revenueSplit(project), { recurring: 0, project: 100000 });
-    assert.equal(monthlyRevenue(retainer), 80000);
-    assert.equal(monthlyRevenue(project), 100000);
+  test("a project's margin runs its whole contract against its whole delivery cost", () => {
+    // 300k contract, 60k/month to serve across three months = 180k cost.
+    assert.equal(projectMarginPct(300000, 60000, "2026-07-01", "2026-09-30"), 40);
   });
 
-  test("a retainer's stray one-time value never leaks into recurring revenue", () => {
+  test("the split is performance for retainers, creative for projects, by month", () => {
+    assert.deepEqual(revenueSplit(retainer, "2026-05"), { performance: 80000, creative: 0 });
+    assert.deepEqual(revenueSplit(project, "2026-07"), { performance: 0, creative: 300000 });
+    assert.deepEqual(revenueSplit(project, "2026-08"), { performance: 0, creative: 0 });
+  });
+
+  test("a retainer's stray one-time value never leaks into revenue", () => {
     // A client switched from project to retainer keeps the old total on the
     // row (the form carries it so nothing is wiped) — it must not be counted.
     const switched = {
@@ -103,7 +125,7 @@ describe("contracts", () => {
       start_date: null,
       end_date: null,
     };
-    assert.deepEqual(revenueSplit(switched), { recurring: 60000, project: 0 });
+    assert.deepEqual(revenueSplit(switched, "2026-08"), { performance: 60000, creative: 0 });
   });
 });
 
@@ -182,6 +204,18 @@ describe("P&L", () => {
     assert.equal(rows.find((row) => row.month === "2026-03")!.contracted, 750000);
     assert.equal(rows.find((row) => row.month === "2026-04")!.contracted, 500000);
     await db.query(`DELETE FROM foundery.clients WHERE slug = 'old-flame'`);
+  });
+
+  test("a one-off project lands whole in its kickoff month, not spread across its run", async () => {
+    await db.query(
+      `INSERT INTO foundery.clients (name, slug, status, engagement, services, one_time_value,
+         delivery_cost, start_date, end_date, billing_day, terms_days)
+       VALUES ('Popup','popup','active','one_time','[]',300000,60000,'2026-07-01','2026-09-30',1,15)`,
+    );
+    const rows = await pnl(12, "2026-08");
+    assert.equal(rows.find((row) => row.month === "2026-07")!.contracted, 800000, "500k retainers + the whole 300k");
+    assert.equal(rows.find((row) => row.month === "2026-08")!.contracted, 500000, "nothing spread forward");
+    await db.query(`DELETE FROM foundery.clients WHERE slug = 'popup'`);
   });
 
   test("totals ignore months that never happened", async () => {

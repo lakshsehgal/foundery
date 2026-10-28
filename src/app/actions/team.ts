@@ -6,14 +6,14 @@ import { getDb, logAudit, setSetting } from "@/lib/db";
 import { getResendConfig, loginCodeEmail, sendEmail } from "@/lib/resend";
 import type { ActionState } from "./clients";
 
-export type TeamMember = { id: number; email: string; role: "founder" | "operator" };
+export type TeamMember = { id: number; email: string; role: "founder" | "founders_office" | "operator" };
 
 export async function listTeam(): Promise<TeamMember[]> {
   const db = await getDb();
   try {
     return await db.query<TeamMember>(
       `SELECT id, email, role FROM foundery.team_members
-       ORDER BY (role = 'founder') DESC, email`,
+       ORDER BY (role = 'founder') DESC, (role = 'founders_office') DESC, email`,
     );
   } catch {
     return [];
@@ -24,7 +24,9 @@ export async function addTeamMember(_prev: ActionState, form: FormData): Promise
   await requireFounder();
 
   const email = String(form.get("email") ?? "").trim().toLowerCase();
-  const role = String(form.get("role")) === "founder" ? "founder" : "operator";
+  const roleRaw = String(form.get("role"));
+  const role =
+    roleRaw === "founder" ? "founder" : roleRaw === "founders_office" ? "founders_office" : "operator";
   if (!email.includes("@")) return { error: "That doesn't look like an email address." };
 
   const db = await getDb();

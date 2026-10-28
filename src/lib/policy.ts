@@ -46,6 +46,20 @@ const FOUNDER_SEES_EVERYTHING: Omit<Visibility, "role"> = {
 export async function policyFor(role: Role): Promise<Visibility> {
   if (role === "founder") return { role, ...FOUNDER_SEES_EVERYTHING };
 
+  // The founder's office runs the business view: all the combined money —
+  // revenue, analytics, cashflow, P&L, client values — but never what any
+  // individual person is paid. Salary line items collapse to one figure;
+  // the total is theirs to see, the split is not. Not a switch, by design.
+  if (role === "founders_office") {
+    return {
+      role,
+      clientValues: true,
+      founderAnalytics: true,
+      pnl: true,
+      costLineItems: (category) => !SENSITIVE_CATEGORIES.includes(category),
+    };
+  }
+
   const settings = await getSettings();
   const flag = (key: string, fallback: string) => (settings.get(key) ?? fallback) === "1";
 

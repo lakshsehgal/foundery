@@ -74,6 +74,29 @@ describe("costs: a person's pay never reaches an operator", () => {
     assert.equal(rows.every((row) => row.editable), true);
   });
 
+  test("founder's office sees the combined salary bill, never the split", async () => {
+    const rows = await listCosts("founders_office");
+    const salaryRows = rows.filter((row) => row.category === "salary");
+    assert.equal(salaryRows.length, 1, "salaries collapse to a single line");
+    assert.equal(salaryRows[0].amount, 173000, "the combined figure is theirs to see");
+
+    const serialised = JSON.stringify(rows);
+    for (const [, person, amount] of salaries) {
+      assert.ok(!serialised.includes(person), `${person} must not be present`);
+      assert.ok(!serialised.includes(String(amount)), `${amount} must not be present`);
+    }
+  });
+
+  test("founder's office sees client values and analytics without any switch", async () => {
+    const policy = await policyFor("founders_office");
+    assert.equal(policy.clientValues, true);
+    assert.equal(policy.founderAnalytics, true);
+    assert.equal(policy.pnl, true);
+    assert.equal(policy.costLineItems("salary"), false, "pay stays combined");
+    assert.equal(policy.costLineItems("tools"), true);
+    assert.equal((await listClients("founders_office"))[0].retainer_amount, 185000);
+  });
+
   test("non-sensitive categories stay itemised for the operator", async () => {
     const tools = (await listCosts("operator")).filter((row) => row.category === "tools");
     assert.equal(tools.length, 2);

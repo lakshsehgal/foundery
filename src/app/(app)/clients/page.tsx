@@ -4,7 +4,8 @@ import { policyFor } from "@/lib/policy";
 import { listClients, listGuidedOnboardings, publicWelcomeUrl } from "@/lib/queries";
 import { listMediaBuyers } from "@/app/actions/media-buyers";
 import { defaultCurrency, fmtMoney, symbolFor } from "@/lib/money";
-import { marginPct, monthlyRevenue } from "@/lib/economics";
+import { isCreative, landingMonth, marginPct, projectMarginPct } from "@/lib/economics";
+import { monthLabel } from "@/lib/dates";
 import { PageBody, PageHeader, PolicyNote } from "@/components/ui/primitives";
 import { ClientsView } from "./clients-view";
 
@@ -40,8 +41,9 @@ export default async function ClientsPage() {
   const money: Record<
     number,
     {
-      monthly: string;
+      monthly: string | null;
       total: string | null;
+      landing: string | null;
       margin: number | null;
       monthlyValue: number;
       totalValue: number | null;
@@ -49,25 +51,40 @@ export default async function ClientsPage() {
   > = {};
   for (const client of clients) {
     if (client.retainer_amount === null || client.one_time_value === null) continue;
-    const monthly = monthlyRevenue({
+    const contract = {
       engagement: client.engagement,
       retainer_amount: client.retainer_amount,
       one_time_value: client.one_time_value,
       start_date: client.start_date,
       end_date: client.end_date,
-    });
-    money[client.id] = {
-      monthly: fmtMoney(monthly, currency),
-      // A project's headline number is its total; the monthly figure above is
-      // how it sits next to a retainer, so both are shown rather than one
-      // silently standing in for the other.
-      total: client.engagement === "one_time" ? fmtMoney(client.one_time_value, currency) : null,
-      margin: marginPct(monthly, client.delivery_cost ?? 0),
-      // The raw figures ride along so the list view can total whatever subset
-      // the filters leave visible — formatted strings don't add up.
-      monthlyValue: monthly,
-      totalValue: client.engagement === "one_time" ? client.one_time_value : null,
     };
+    if (isCreative(contract)) {
+      // A creative one-off is a whole contract that lands in its kickoff
+      // month — the same rule the invoices, forecast and P&L follow.
+      const landing = landingMonth(contract);
+      money[client.id] = {
+        monthly: null,
+        total: fmtMoney(client.one_time_value, currency),
+        landing: landing ? monthLabel(landing) : null,
+        margin: projectMarginPct(
+          client.one_time_value,
+          client.delivery_cost ?? 0,
+          client.start_date,
+          client.end_date,
+        ),
+        monthlyValue: 0,
+        totalValue: client.one_time_value,
+      };
+    } else {
+      money[client.id] = {
+        monthly: fmtMoney(client.retainer_amount, currency),
+        total: null,
+        landing: null,
+        margin: marginPct(client.retainer_amount, client.delivery_cost ?? 0),
+        monthlyValue: client.retainer_amount,
+        totalValue: null,
+      };
+    }
   }
 
   const active = clients.filter((c) => c.status === "active").length;

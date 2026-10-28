@@ -19,9 +19,12 @@ import { fmtMoney, type CurrencyCode } from "@/lib/money";
 import { ClientEditor } from "./client-editor";
 
 export type ClientMoney = {
-  monthly: string;
-  /** Set only for one-off projects: the whole contract, not the monthly slice. */
+  /** A retainer's monthly fee; null for one-off projects. */
+  monthly: string | null;
+  /** A project's whole contract; null for retainers. */
   total: string | null;
+  /** The month a project's revenue lands (its kickoff month), human-readable. */
+  landing: string | null;
   margin: number | null;
   /** The raw numbers behind the strings, so the list view can add them up. */
   monthlyValue: number;
@@ -165,7 +168,6 @@ function ListTable({
   const sum = (list: ClientView[], pick: (figures: ClientMoney) => number) =>
     list.reduce((acc, client) => acc + (money[client.id] ? pick(money[client.id]) : 0), 0);
   const retainerMonthly = sum(retainers, (figures) => figures.monthlyValue);
-  const projectMonthly = sum(projects, (figures) => figures.monthlyValue);
   const projectTotal = sum(projects, (figures) => figures.totalValue ?? 0);
 
   return (
@@ -251,7 +253,7 @@ function ListTable({
                     : `Day ${client.billing_day} · net ${client.terms_days}`}
                 </Td>
                 <Td align="right" className="tabular whitespace-nowrap font-semibold">
-                  {figures ? figures.monthly : <Redacted />}
+                  {figures ? figures.monthly ?? "—" : <Redacted />}
                 </Td>
                 <Td align="right" className="tabular whitespace-nowrap text-[var(--color-ink-2)]">
                   {figures?.total ?? "—"}
@@ -273,7 +275,9 @@ function ListTable({
           <tr>
             <FootTd colSpan={5}>
               Retainers · {retainers.length}
-              <span className="ml-1.5 font-normal text-[var(--color-ink-3)]">recurring book</span>
+              <span className="ml-1.5 font-normal text-[var(--color-ink-3)]">
+                the performance book, per month
+              </span>
             </FootTd>
             <FootTd align="right">
               {canEditValues ? `${fmtMoney(retainerMonthly, currency)} / mo` : <Redacted />}
@@ -286,29 +290,13 @@ function ListTable({
               <FootTd colSpan={5}>
                 One-off projects · {projects.length}
                 <span className="ml-1.5 font-normal text-[var(--color-ink-3)]">
-                  spread over their months
+                  creative — whole contracts, landing at kickoff
                 </span>
               </FootTd>
-              <FootTd align="right">
-                {canEditValues ? `${fmtMoney(projectMonthly, currency)} / mo` : <Redacted />}
-              </FootTd>
+              <FootTd align="right">—</FootTd>
               <FootTd align="right">
                 {canEditValues ? fmtMoney(projectTotal, currency) : <Redacted />}
               </FootTd>
-              <FootTd align="right" />
-            </tr>
-          )}
-          {retainers.length > 0 && projects.length > 0 && (
-            <tr>
-              <FootTd colSpan={5}>Everything · {rows.length} clients</FootTd>
-              <FootTd align="right">
-                {canEditValues ? (
-                  `${fmtMoney(retainerMonthly + projectMonthly, currency)} / mo`
-                ) : (
-                  <Redacted />
-                )}
-              </FootTd>
-              <FootTd align="right">—</FootTd>
               <FootTd align="right" />
             </tr>
           )}
@@ -587,14 +575,14 @@ export function ClientsView({
                           <>
                             <div className="min-w-0">
                               <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-[var(--color-ink-3)]">
-                                {client.engagement === "retainer" ? "Retainer / mo" : "Per month"}
+                                {client.engagement === "retainer" ? "Retainer / mo" : "Project value"}
                               </p>
                               <p className="tabular truncate text-[17px] font-bold tracking-tight">
-                                {figures.monthly}
+                                {figures.monthly ?? figures.total}
                               </p>
-                              {figures.total && (
+                              {client.engagement === "one_time" && (
                                 <p className="tabular text-[10.5px] text-[var(--color-ink-3)]">
-                                  {figures.total} total
+                                  {figures.landing ? `lands ${figures.landing}` : "set a start date to place it"}
                                 </p>
                               )}
                             </div>

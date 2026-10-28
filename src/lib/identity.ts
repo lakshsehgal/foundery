@@ -55,8 +55,10 @@ function parseList(raw: string | undefined): string[] {
 export function roleForEmail(email: string): Role | null {
   const normalized = email.trim().toLowerCase();
   const founders = parseList(process.env.FOUNDERY_FOUNDER_EMAILS || "laksh@neuroidmedia.com");
+  const office = parseList(process.env.FOUNDERY_FOUNDERS_OFFICE_EMAILS);
   const operators = parseList(process.env.FOUNDERY_OPERATOR_EMAILS);
   if (founders.includes(normalized)) return "founder";
+  if (office.includes(normalized)) return "founders_office";
   if (operators.includes(normalized)) return "operator";
   return null;
 }
@@ -77,7 +79,7 @@ export async function teamRoleForEmail(email: string): Promise<Role | null> {
       [normalized],
     );
     const role = rows[0]?.role;
-    if (role === "founder" || role === "operator") return role;
+    if (role === "founder" || role === "founders_office" || role === "operator") return role;
   } catch {
     // Table not created yet — the environment fallback below still answers.
   }

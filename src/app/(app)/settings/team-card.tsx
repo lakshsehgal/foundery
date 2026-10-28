@@ -54,7 +54,7 @@ export function TeamCard({
     <Card>
       <CardTitle
         title="Users & access"
-        hint="Who can sign in, and as which of the two roles: founder sees everything including money and analytics; operator runs the day-to-day with values hidden unless you switch them on below. Changes apply on their next sign-in."
+        hint="Who can sign in, and as which role: founder sees everything; founder's office sees the combined money — analytics, cashflow, P&L, client values — but never an individual's salary; operator runs the day-to-day with values hidden unless you switch them on below. Changes apply on their next sign-in."
       />
 
       <ul className="mb-4 space-y-1.5">
@@ -69,8 +69,20 @@ export function TeamCard({
             className="flex items-center gap-2.5 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] px-3 py-2"
           >
             <span className="min-w-0 flex-1 truncate text-[13px]">{member.email}</span>
-            <Chip tone={member.role === "founder" ? "var(--color-warning)" : "var(--color-series-1)"}>
-              {member.role === "founder" ? "Founder" : "Operator"}
+            <Chip
+              tone={
+                member.role === "founder"
+                  ? "var(--color-warning)"
+                  : member.role === "founders_office"
+                    ? "var(--color-accent)"
+                    : "var(--color-series-1)"
+              }
+            >
+              {member.role === "founder"
+                ? "Founder"
+                : member.role === "founders_office"
+                  ? "Founder's office"
+                  : "Operator"}
             </Chip>
             <RemoveButton member={member} />
           </li>
@@ -81,9 +93,10 @@ export function TeamCard({
         <div className="min-w-[220px] flex-1">
           <TextInput name="email" type="email" placeholder="teammate@neuroidmedia.com" aria-label="Email to add" />
         </div>
-        <div className="w-[130px] shrink-0">
+        <div className="w-[160px] shrink-0">
           <Select name="role" defaultValue="operator" aria-label="Role">
             <option value="operator">Operator</option>
+            <option value="founders_office">Founder&apos;s office</option>
             <option value="founder">Founder</option>
           </Select>
         </div>
